@@ -85,6 +85,19 @@ api.on("revalidate", ({ key, response }) => { /* SWR refresh */ });
 - **v0.2.0** — Stale-while-revalidate with background refresh and cache subscription notifications.
 - **v0.3.0** — Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch of subscribed and tracked keys, plus explicit `client.invalidate`.
 
+## Documentation
+
+- Package docs (npm-facing): [`packages/core/README.md`](packages/core/README.md)
+- Docs index: [`docs/INDEX.md`](docs/INDEX.md)
+  - [Getting started](docs/getting-started.md)
+  - [Request intelligence — dedup, cache & SWR](docs/request-intelligence.md)
+  - [Retries & backoff](docs/retries-and-backoff.md)
+  - [Cancellation & timeouts](docs/cancellation-and-timeouts.md)
+  - [Cache invalidation](docs/cache-invalidation.md)
+  - [Events & lifecycle](docs/events-and-lifecycle.md)
+  - [Architecture](docs/architecture.md)
+  - [API reference](docs/api-reference.md)
+
 ## Package status
 
 This monorepo ships `@reqmind/core` from `packages/core`. Each semantic release is tagged (`v0.1.0`, `v0.2.0`, `v0.3.0`); CI typechecks, tests, and builds on every push, then publishes to npm from a version tag using the `NPM_TOKEN` secret.

@@ -26,18 +26,29 @@ const READ_METHODS = new Set<HttpMethod>(["GET", "HEAD", "OPTIONS"]);
 const CACHEABLE_METHODS = new Set<HttpMethod>(["GET"]);
 
 export interface ClientEvents {
+  /** A network flight is about to start (owner of the request). */
   request: { key: string; method: HttpMethod; url: string; tracker: Tracker };
+  /** A request resolved with a 2xx response. */
   success: { key: string; tracker: Tracker; response: ApiResponse };
+  /** A request failed after retries were exhausted. */
   error: { key: string; tracker: Tracker; error: unknown };
+  /** An attempt failed and a retry has been scheduled. */
   retry: { key: string; tracker: Tracker; attempts: number; delay: number; error: HttpError };
+  /** A request was cancelled (cancel(), external signal, or abort). */
   cancel: { key: string; tracker: Tracker };
+  /** The response was served from cache (fresh read or SWR). */
   "cache-hit": { key: string; tracker: Tracker };
+  /** A fresh response was stored in the cache. */
   "cache-write": { key: string; response: ApiResponse };
+  /** Cache entries were invalidated. */
   invalidate: { keys: string[]; target: InvalidateTarget };
+  /** A background refetch (SWR or post-invalidation) landed a fresh copy. */
   revalidate: { key: string; response: ApiResponse };
 }
 
+/** A normal promise extended with a `.cancel()` method. */
 export interface CancellablePromise<T> extends Promise<T> {
+  /** Abort the request and reject with `CancelledError`. */
   cancel: () => void;
 }
 
@@ -89,6 +100,7 @@ function serializeBody(body: unknown): BodyInit | undefined {
 }
 
 export interface Client {
+  /** Generic request. Sugar methods below wrap this one. */
   request<T>(method: HttpMethod, url: string, options?: RequestOptions): CancellablePromise<ApiResponse<T>>;
   get<T>(url: string, options?: RequestOptions): CancellablePromise<ApiResponse<T>>;
   post<T>(url: string, body?: unknown, options?: RequestOptions): CancellablePromise<ApiResponse<T>>;
@@ -98,13 +110,35 @@ export interface Client {
   head<T>(url: string, options?: RequestOptions): CancellablePromise<ApiResponse<T>>;
   options<T>(url: string, options?: RequestOptions): CancellablePromise<ApiResponse<T>>;
 
+  /** Subscribe to a lifecycle event. Returns an unsubscribe function. */
   on<K extends keyof ClientEvents>(event: K, listener: (payload: ClientEvents[K]) => void): () => void;
+  /**
+   * Watch a cache region. Matching keys are marked as "interesting" so that
+   * cache invalidation refetches them in the background. Returns an
+   * unsubscribe function.
+   */
   subscribe<T>(matcher: (key: string) => boolean, listener: CacheSubscriber<T>): () => void;
+  /**
+   * Invalidate cached entries by path (with children + query variants), tag,
+   * or predicate. By default subscribed/tracked keys are refetched (disable
+   * with `{ refetch: false }`). Returns the removed keys.
+   */
   invalidate(target: InvalidateTarget, options?: { refetch?: boolean }): string[];
+  /** Cancel every in-flight request tracked by this client. */
   cancelAll(): void;
+  /** Drop all cached entries. */
   clearCache(): void;
 }
 
+/**
+ * Create a ReqMind client — a fetch wrapper that applies request
+ * deduplication, caching, stale-while-revalidate, smart retries,
+ * cancellation/timeouts, and mutation-driven cache invalidation.
+ *
+ * @param options - Client-wide configuration: base URL, default headers,
+ *   cache/retry/timeout defaults, and an optional custom fetch.
+ * @returns A `Client` with typed methods and a lifecycle event system.
+ */
 export function createClient(options: ClientOptions = {}): Client {
   const cache = new CacheStore(resolveCache(options.cache).ttl);
   const deduper = new Deduper();

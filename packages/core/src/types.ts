@@ -7,6 +7,7 @@ export type HttpMethod =
   | "HEAD"
   | "OPTIONS";
 
+/** Lifecycle state of a request's tracker. */
 export type RequestState =
   | "idle"
   | "pending"
@@ -18,10 +19,11 @@ export type RequestState =
 export type CacheStrategy = "cache-first" | "stale-while-revalidate";
 
 export interface CacheOptions {
-  /** Enable response caching for read requests (default: false). */
+  /** Enable response caching for read requests (default: true at the client level). */
   enabled?: boolean;
   /** Time-to-live in milliseconds. Default: 30_000. */
   ttl?: number;
+  /** Serve stale data instantly and refresh in the background (default: "cache-first"). */
   strategy?: CacheStrategy;
 }
 
@@ -43,6 +45,7 @@ export interface RetryOptions {
 
 export type ParamValue = string | number | boolean | null | undefined;
 
+/** Per-request configuration. Overrides client defaults. */
 export interface RequestOptions {
   method: HttpMethod;
   url: string;
@@ -50,14 +53,16 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   params?: Record<string, ParamValue | ParamValue[]>;
   body?: unknown;
-  /** External cancellation handle. */
+  /** External cancellation handle. An already-aborted signal rejects immediately. */
   signal?: AbortSignal;
   timeout?: number;
   cache?: boolean | CacheOptions;
   retry?: boolean | RetryOptions;
+  /** Tags joined with the request path during mutation-driven invalidation. */
   tags?: string[];
 }
 
+/** A resolved response carrying parsed body and HTTP metadata. */
 export interface ApiResponse<T = unknown> {
   data: T;
   status: number;
@@ -75,14 +80,17 @@ export interface ClientOptions {
   fetch?: typeof fetch;
 }
 
+/** Update delivered to cache subscribers via `client.subscribe`. */
 export interface CacheUpdate<T = unknown> {
   type: "write" | "revalidate" | "invalidate";
   key: string;
   response?: ApiResponse<T>;
 }
 
+/** What to invalidate: an exact path, tag list, or a predicate over metadata. */
 export type InvalidateTarget = string | string[] | ((entry: CacheMeta) => boolean);
 
+/** Metadata stored alongside every cached response. */
 export interface CacheMeta {
   key: string;
   tags: string[];
