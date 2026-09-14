@@ -1,0 +1,49 @@
+{
+  "name": "@reqmind/core",
+  "version": "0.1.0",
+  "description": "Request Intelligence Engine — dedup, cache, smart retry, cancellation and lifecycle events for HTTP requests",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "./build.sh",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "fetch",
+    "http",
+    "client",
+    "cache",
+    "dedupe",
+    "retry",
+    "request",
+    "swr",
+    "reqmind"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

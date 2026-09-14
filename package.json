@@ -1,0 +1,19 @@
+{
+  "name": "reqmind",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Request Intelligence Engine — an infrastructure layer for HTTP requests",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @reqmind/core",
+    "test": "npm run test -w @reqmind/core",
+    "typecheck": "npm run typecheck -w @reqmind/core",
+    "clean": "npm run clean -w @reqmind/core"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
