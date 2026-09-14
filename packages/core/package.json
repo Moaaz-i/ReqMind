@@ -1,6 +1,6 @@
 {
   "name": "@reqmind/core",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Request Intelligence Engine — dedup, cache, smart retry, cancellation and lifecycle events for HTTP requests",
   "license": "MIT",
   "sideEffects": false,

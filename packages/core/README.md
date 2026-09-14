@@ -13,6 +13,7 @@ A request intelligence engine for the fetch era: request deduplication, an offli
 | **v0.1.0** | MVP | Dedup, TTL cache, retry with backoff, cancellation, timeouts, lifecycle events |
 | **v0.2.0** | SWR | Stale-while-revalidate + background refresh + cache subscription notifications |
 | **v0.3.0** | Invalidation | Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch |
+| **v0.4.0** | Docs & hardening | Full documentation suite, JSDoc on the public API, invalidation/refetch fixes |
 
 ## Install
 

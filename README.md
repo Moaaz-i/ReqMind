@@ -84,6 +84,7 @@ api.on("revalidate", ({ key, response }) => { /* SWR refresh */ });
 - **v0.1.0** — MVP: request dedup, TTL cache, retry policy, cancellation, timeout, events, custom methods.
 - **v0.2.0** — Stale-while-revalidate with background refresh and cache subscription notifications.
 - **v0.3.0** — Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch of subscribed and tracked keys, plus explicit `client.invalidate`.
+- **v0.4.0** — Docs & hardening: full docs suite + JSDoc on the public API, invalidation/refetch fixes.
 
 ## Documentation
 

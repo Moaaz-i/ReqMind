@@ -20,5 +20,6 @@ ReqMind is a **request intelligence engine**: a drop-in wrapper around `fetch` t
 - **v0.1.0** — MVP: dedup, TTL cache, retry policy, cancellation, timeouts, lifecycle events.
 - **v0.2.0** — Stale-while-revalidate with background refresh and `revalidate` notifications.
 - **v0.3.0** — Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch.
+- **v0.4.0** — Docs & hardening: docs suite + JSDoc, invalidation/refetch fixes.
 
 Package entry point: [`@reqmind/core`](https://www.npmjs.com/package/@reqmind/core) — see [`packages/core/README.md`](../packages/core/README.md).
