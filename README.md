@@ -75,6 +75,7 @@ api.on("revalidate", ({ key, response }) => { /* SWR refresh */ });
 | **Cache** | In-memory TTL cache keyed by a stable request fingerprint (method, URL, headers). |
 | **SWR** | `stale-while-revalidate` serves stale data instantly while refreshing in the background. |
 | **Retry** | Configurable attempts, exponential backoff, jitter, timeout-based backoff, and `Retry-After` support. |
+| **Circuit breaker** | Per-endpoint `closed`/`open`/`halfOpen` isolation — bulk-failing endpoints are rejected instantly, siblings keep working. |
 | **Cancellation** | `request.cancel()`, external `AbortSignal`, or timeouts — with a "cancelled" tracker state. |
 | **Invalidation** | By exact path (with children + query variants), tags, or predicate; auto-refetches subscribed keys. |
 | **Events** | Fine-grained lifecycle events + `subscribe` for watching cache regions. |
@@ -86,6 +87,7 @@ api.on("revalidate", ({ key, response }) => { /* SWR refresh */ });
 - **v0.3.0** — Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch of subscribed and tracked keys, plus explicit `client.invalidate`.
 - **v0.4.0** — Docs & hardening: full docs suite + JSDoc on the public API, invalidation/refetch fixes.
 - **v0.5.0** — Intelligence engine: `client.intelligence()` board, per-endpoint latency, adaptive timeout & stale-while-revalidate.
+- **v0.6.0** — Resilience engine: per-endpoint circuit breaker (closed/open/half-open), `circuit-*` events, `client.circuitBreaker()`, circuit stats on the intelligence board.
 
 ## Documentation
 
@@ -97,6 +99,7 @@ api.on("revalidate", ({ key, response }) => { /* SWR refresh */ });
   - [Cancellation & timeouts](docs/cancellation-and-timeouts.md)
   - [Cache invalidation](docs/cache-invalidation.md)
   - [Intelligence engine](docs/intelligence.md)
+  - [Resilience](docs/resilience.md)
   - [Events & lifecycle](docs/events-and-lifecycle.md)
   - [Architecture](docs/architecture.md)
   - [API reference](docs/api-reference.md)

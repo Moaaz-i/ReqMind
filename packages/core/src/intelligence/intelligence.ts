@@ -2,6 +2,7 @@ import type { CacheStrategy, HttpMethod, IntelligenceOptions } from "../types.js
 import type { ClientEvents } from "../client/client.js";
 import type { EventEmitter } from "../events/event-emitter.js";
 import type { Tracker } from "../request/tracker.js";
+import type { CircuitState, CircuitStatus } from "../circuit/circuit-breaker.js";
 import { HttpError, TimeoutError } from "../errors.js";
 import { urlPath } from "../utils/url.js";
 
@@ -32,6 +33,12 @@ export interface EndpointStats {
   timeouts: number;
   /** Terminal cancellation outcomes. */
   cancels: number;
+  /** Requests rejected by the circuit breaker before reaching the network. */
+  circuitRejected: number;
+  /** Current circuit state for this endpoint. */
+  circuit: CircuitState;
+  /** Consecutive failures the circuit is counting toward tripping. */
+  circuitFailures: number;
   /** End-to-end latency (including retries) across a bounded sample window. */
   latency: {
     avg: number;
@@ -56,6 +63,10 @@ export interface IntelligenceSummary {
   rateLimited: number;
   timeouts: number;
   cancels: number;
+  /** Requests rejected by the circuit breaker. */
+  circuitRejected: number;
+  /** Circuit states across every known endpoint circuit. */
+  circuits: { open: number; halfOpen: number; closed: number };
 }
 
 /** Full intelligence readout: roll-up + per-endpoint table. */
@@ -87,7 +98,7 @@ const MAX_ADAPTIVE_TIMEOUT_MS = 60_000;
 const MAX_LATENCY_SAMPLES = 64;
 
 interface EndpointState {
-  stats: Omit<EndpointStats, "cacheMisses">;
+  stats: Omit<EndpointStats, "cacheMisses" | "circuit" | "circuitFailures">;
   latencies: number[];
 }
 
@@ -103,7 +114,7 @@ function percentile(sorted: number[], p: number): number {
   return sorted[idx] ?? 0;
 }
 
-function emptyStats(method: HttpMethod, path: string): Omit<EndpointStats, "cacheMisses"> {
+function emptyStats(method: HttpMethod, path: string): Omit<EndpointStats, "cacheMisses" | "circuit" | "circuitFailures"> {
   return {
     method,
     path,
@@ -117,6 +128,7 @@ function emptyStats(method: HttpMethod, path: string): Omit<EndpointStats, "cach
     rateLimited: 0,
     timeouts: 0,
     cancels: 0,
+    circuitRejected: 0,
     latency: { avg: 0, p50: 0, p95: 0, samples: 0 },
   };
 }
@@ -141,6 +153,7 @@ export class Intelligence {
     options: IntelligenceOptions | undefined,
     events: EventEmitter<ClientEvents>,
     private readonly getActiveRequests: () => number,
+    private readonly getCircuit: (method: HttpMethod, path: string) => CircuitStatus,
   ) {
     this.enabled = options?.enabled !== false;
     this.adaptiveTimeout = options?.adaptiveTimeout === true;
@@ -192,6 +205,9 @@ export class Intelligence {
       if (!meta) return;
       this.state(meta.method, meta.path).stats.cancels += 1;
       this.trackerMeta.delete(tracker);
+    });
+    events.on("circuit-rejected", ({ method, path }) => {
+      this.state(method, path).stats.circuitRejected += 1;
     });
   }
 
@@ -247,6 +263,12 @@ export class Intelligence {
     const totalRequests = sum(this.endpoints, (s) => s.stats.requests);
     const cacheHits = sum(this.endpoints, (s) => s.stats.cacheHits);
     const deduplicated = sum(this.endpoints, (s) => s.stats.dedupPrevented);
+    const circuitCounts = { open: 0, halfOpen: 0, closed: 0 };
+    for (const endpoint of this.endpoints.keys()) {
+      const [method, ...pathParts] = endpoint.split(" ");
+      const state = this.getCircuit(method as HttpMethod, pathParts.join(" ")).state;
+      circuitCounts[state] += 1;
+    }
     const cacheMisses = Math.max(0, totalRequests - cacheHits - deduplicated);
     return {
       totalRequests,
@@ -261,6 +283,8 @@ export class Intelligence {
       rateLimited: sum(this.endpoints, (s) => s.stats.rateLimited),
       timeouts: sum(this.endpoints, (s) => s.stats.timeouts),
       cancels: sum(this.endpoints, (s) => s.stats.cancels),
+      circuitRejected: sum(this.endpoints, (s) => s.stats.circuitRejected),
+      circuits: circuitCounts,
     };
   }
 
@@ -288,9 +312,12 @@ export class Intelligence {
   }
 
   private toPublic(state: EndpointState): EndpointStats {
+    const circuit = this.getCircuit(state.stats.method, state.stats.path);
     return {
       ...state.stats,
       cacheMisses: Math.max(0, state.stats.requests - state.stats.cacheHits - state.stats.dedupPrevented),
+      circuit: circuit.state,
+      circuitFailures: circuit.consecutiveFailures,
       latency: { ...state.stats.latency },
     };
   }
@@ -316,5 +343,7 @@ function emptySummary(activeRequests: number): IntelligenceSummary {
     rateLimited: 0,
     timeouts: 0,
     cancels: 0,
+    circuitRejected: 0,
+    circuits: { open: 0, halfOpen: 0, closed: 0 },
   };
 }

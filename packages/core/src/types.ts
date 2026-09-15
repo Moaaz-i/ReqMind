@@ -43,6 +43,16 @@ export interface RetryOptions {
   respectRetryAfter?: boolean;
 }
 
+/** Circuit breaker policy, applied per endpoint (`METHOD pathname`). */
+export interface CircuitBreakerOptions {
+  /** Master switch for circuit breaking (default: true). */
+  enabled?: boolean;
+  /** Consecutive failures that trip the circuit closed→open (default: 5). */
+  failureThreshold?: number;
+  /** How long the circuit stays open before letting one probe through, in ms (default: 10_000). */
+  resetTimeout?: number;
+}
+
 export type ParamValue = string | number | boolean | null | undefined;
 
 /** Per-request configuration. Overrides client defaults. */
@@ -80,6 +90,8 @@ export interface ClientOptions {
   fetch?: typeof fetch;
   /** Observation + adaptive behaviors (see IntelligenceOptions). */
   intelligence?: IntelligenceOptions;
+  /** Circuit breaker policy per endpoint (see CircuitBreakerOptions). */
+  circuitBreaker?: CircuitBreakerOptions;
 }
 
 /** Update delivered to cache subscribers via `client.subscribe`. */

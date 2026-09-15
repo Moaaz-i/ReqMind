@@ -32,6 +32,17 @@ export class CancelledError extends Error {
   }
 }
 
+/** Thrown when a request is rejected without being sent because its circuit is open. */
+export class CircuitOpenError extends Error {
+  readonly endpoint: string;
+
+  constructor(endpoint: string, message?: string) {
+    super(message ?? `Circuit is open for endpoint ${endpoint}; request was not attempted`);
+    this.name = "CircuitOpenError";
+    this.endpoint = endpoint;
+  }
+}
+
 /**
  * True when an error came from aborting the request (user cancellation,
  * timeout, or fetch's own AbortError).

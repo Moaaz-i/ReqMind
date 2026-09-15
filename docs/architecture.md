@@ -20,6 +20,8 @@ src/
 │   └── deduper.ts              # in-flight request coalescing
 ├── intelligence/
 │   └── intelligence.ts         # observation → per-endpoint recommendations
+├── circuit/
+│   └── circuit-breaker.ts      # per-endpoint failure isolation (closed/open/halfOpen)
 ├── retry/
 │   └── policy.ts               # decideRetry / resolveRetryOptions
 ├── events/
@@ -50,7 +52,12 @@ client.get(url, opts)
         ├─ 2. DEDUP
         │      deduper.get(key)               → join an in-flight flight
         │
-        └─ 3. OWNER
+        ├─ 3. CIRCUIT GUARD (owner only)
+        │      circuitBreaker.beforeRequest("GET /path")
+        │        ├─ closed / open→halfOpen probe → proceed
+        │        └─ open or probe in flight    → circuit-rejected + CircuitOpenError
+        │
+        └─ 4. OWNER
                deduper.attach(key, fetchNetwork(spec, tracker))
                      │
                      ▼
@@ -108,17 +115,21 @@ interface CacheEntry<T> {
 | `.cancel()` on the returned promise (not `.abort()`) | Keeps the surface minimal and naming unambiguous |
 | `HttpError` carries `.status`, `.statusText`, `.headers` | Programmatic retry decisions need full context |
 | Intelligence listens to lifecycle events (never patched into fetch) | One source of truth; observation can't drift from execution |
+| Failures are recorded by the circuit at the terminal flight outcome, not via `error` events | Deduped consumers never double-count; the counter reflects real network outcomes |
+| Cache hits and dedup joins bypass the circuit guard; internal refetches are dropped silently when open | A cached copy beats an error, and nothing user-facing was attempted by a blocked refetch |
+| Circuit states are keyed by `METHOD pathname`, ignoring query strings | Endpoint isolation — one endpoint's failure must not leak into its siblings |
+| 4xx and cancellation are not countable failures | They describe a bad request or caller intent, not a failing server |
 | Adaptive tips need ≥ 5 samples, `3×p95`, capped 100ms–60s | Avoids premature behavior changes from noisy single calls |
+| The circuit breaker is deterministic and configured once (no runtime mutation, no adaptive breaker yet) | Predictable isolation; adaptive decisions arrive with the intelligence engine |
 | Dual ESM+CJS via `tsc` | No bundler dependency; simplest reliable dual build |
 
 ## Publishing & versioning
 
-- All layers live in one codebase, released as `v0.1.0 → v0.4.0` (intelligence in `v0.5.0`).
+- All layers live in one codebase, released as `v0.1.0 → v0.4.0` (intelligence in `v0.5.0`, circuit breaker in `v0.6.0`).
 - CI: typecheck + test + build on every push; `npm publish` on `v*` tags using the `NPM_TOKEN` secret.
 
 ## Roadmap ideas
 
-- Circuit breaker / endpoint isolation (OPEN · HALF-OPEN · CLOSED) — `v0.6.0`
 - Advanced cache (persistent, custom stores) — `v0.7.x`
 - Observability (trace export, metrics hooks)
 - Devtools (timeline, cache inspector, latency replay)

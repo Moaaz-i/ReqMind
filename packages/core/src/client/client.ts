@@ -12,10 +12,12 @@ import type {
 } from "../types.js";
 import { CacheStore } from "../cache/cache-store.js";
 import { Deduper } from "../dedup/deduper.js";
+import { CircuitBreaker } from "../circuit/circuit-breaker.js";
+import type { CircuitBreakerController } from "../circuit/circuit-breaker.js";
 import { EventEmitter } from "../events/event-emitter.js";
 import { Intelligence } from "../intelligence/intelligence.js";
 import type { IntelligenceController } from "../intelligence/intelligence.js";
-import { CancelledError, HttpError, TimeoutError } from "../errors.js";
+import { CancelledError, CircuitOpenError, HttpError, TimeoutError } from "../errors.js";
 import { Tracker } from "../request/tracker.js";
 import { parseResponse } from "../request/response.js";
 import { resolveRetryOptions, decideRetry } from "../retry/policy.js";
@@ -48,6 +50,14 @@ export interface ClientEvents {
   invalidate: { keys: string[]; target: InvalidateTarget };
   /** A background refetch (SWR or post-invalidation) landed a fresh copy. */
   revalidate: { key: string; response: ApiResponse };
+  /** An endpoint's circuit tripped closed→open (or halfOpen→open). */
+  "circuit-open": { endpoint: string; method: HttpMethod; path: string };
+  /** An endpoint's circuit admitted its first probe (open→halfOpen). */
+  "circuit-half-open": { endpoint: string; method: HttpMethod; path: string };
+  /** An endpoint's circuit recovered (halfOpen→closed). */
+  "circuit-closed": { endpoint: string; method: HttpMethod; path: string };
+  /** A request was blocked before sending because its circuit was open. */
+  "circuit-rejected": { endpoint: string; method: HttpMethod; path: string; error: CircuitOpenError };
 }
 
 /** A normal promise extended with a `.cancel()` method. */
@@ -133,6 +143,8 @@ export interface Client {
   cancelAll(): void;
   /** Drop all cached entries. */
   clearCache(): void;
+  /** Read/reset the per-endpoint circuit breaker state. */
+  circuitBreaker(): CircuitBreakerController;
 }
 
 /**
@@ -152,8 +164,15 @@ export function createClient(options: ClientOptions = {}): Client {
   const flightTrackers = new Map<string, Tracker>();
   /** Keys actively observed via `subscribe` — used to refetch after invalidation. */
   const interest = new Map<string, number>();
+  /** Circuit breaker state per endpoint (`METHOD pathname`). */
+  const circuitBreaker = new CircuitBreaker(options.circuitBreaker, events);
   /** Observation + adaptive decision layer. */
-  const intelligence = new Intelligence(options.intelligence, events, () => flightTrackers.size);
+  const intelligence = new Intelligence(
+    options.intelligence,
+    events,
+    () => flightTrackers.size,
+    (method, path) => circuitBreaker.status(method + " " + path),
+  );
 
   const defaultRetry: RetryOptions = { ...DEFAULT_RETRY, ...options.retry };
 
@@ -227,6 +246,7 @@ export function createClient(options: ClientOptions = {}): Client {
    */
   async function fetchNetwork(spec: RequestSpec, tracker: Tracker): Promise<ApiResponse> {
     const retry = resolveRetryOptions(spec.retry);
+    const endpoint = spec.method + " " + urlPath(spec.url);
     let attempts = 0;
 
     for (;;) {
@@ -259,10 +279,22 @@ export function createClient(options: ClientOptions = {}): Client {
           signal: attemptController.signal,
         });
       } catch (err) {
-        if (timedOut) throw new TimeoutError(spec.timeout ?? 0);
-        if (tracker.cancelled) throw new CancelledError();
-        if (err instanceof Error && err.name === "AbortError") throw new CancelledError();
-        throw new HttpError(undefined, "Network Error", String(err));
+        if (timedOut) {
+          const timeoutError = new TimeoutError(spec.timeout ?? 0);
+          circuitBreaker.recordFailure(endpoint, timeoutError);
+          throw timeoutError;
+        }
+        if (tracker.cancelled) {
+          circuitBreaker.recordFailure(endpoint, new CancelledError());
+          throw new CancelledError();
+        }
+        if (err instanceof Error && err.name === "AbortError") {
+          circuitBreaker.recordFailure(endpoint, new CancelledError());
+          throw new CancelledError();
+        }
+        const networkError = new HttpError(undefined, "Network Error", String(err));
+        circuitBreaker.recordFailure(endpoint, networkError);
+        throw networkError;
       } finally {
         if (timer) clearTimeout(timer);
         tracker.signal.removeEventListener("abort", propagateAbort);
@@ -270,6 +302,7 @@ export function createClient(options: ClientOptions = {}): Client {
 
       if (isSuccessStatus(response.status)) {
         tracker.setState("success");
+        circuitBreaker.recordSuccess(endpoint);
         return parseResponse(response);
       }
 
@@ -283,6 +316,7 @@ export function createClient(options: ClientOptions = {}): Client {
       const decision = decideRetry({ error: httpError, options: retry, attempts });
       if (!decision.shouldRetry) {
         tracker.setState("error");
+        circuitBreaker.recordFailure(endpoint, httpError);
         throw httpError;
       }
 
@@ -383,6 +417,10 @@ export function createClient(options: ClientOptions = {}): Client {
 
   /** Background refetch of a stale/removed entry, coalesced via the deduper. */
   function refetchEntry(key: string, spec: RequestSpec, subscribers: Set<CacheSubscriber>): void {
+    // Never probe or retry an endpoint the circuit is refusing to serve.
+    const endpointKey = spec.method + " " + urlPath(spec.url);
+    if (!circuitBreaker.beforeRequest(endpointKey).allowed) return;
+
     const tracker = new Tracker(key);
     flightTrackers.set(key, tracker);
 
@@ -476,7 +514,25 @@ export function createClient(options: ClientOptions = {}): Client {
       }
     }
 
-    // 3. Own the request lifecycle.
+    // 3. Circuit guard: reject before touching the network when this endpoint
+    //    is open (or a half-open probe is already in flight).
+    const endpointKey = method + " " + urlPath(spec.url);
+    const verdict = circuitBreaker.beforeRequest(endpointKey);
+    if (!verdict.allowed) {
+      const error = new CircuitOpenError(endpointKey);
+      consumerTracker = new Tracker(key);
+      events.emit("circuit-rejected", {
+        endpoint: endpointKey,
+        method,
+        path: urlPath(spec.url),
+        error,
+      });
+      const rejected = Promise.reject(error);
+      rejected.catch(() => undefined);
+      return boxed(consumerTracker, rejected);
+    }
+
+    // 4. Own the request lifecycle.
     consumerTracker = new Tracker(key);
     wireExternalCancel(requestOptions.signal, consumerTracker);
     events.emit("request", { key, method, url: spec.url, tracker: consumerTracker });
@@ -591,6 +647,17 @@ export function createClient(options: ClientOptions = {}): Client {
         snapshot: () => intelligence.snapshot(),
         endpoint: (method: HttpMethod, path: string) => intelligence.endpoint(method, path),
         reset: () => intelligence.reset(),
+      };
+    },
+
+    circuitBreaker(): CircuitBreakerController {
+      return {
+        status: (method, path) => circuitBreaker.status(method + " " + path),
+        statuses: () => circuitBreaker.statuses(),
+        reset: (method?: HttpMethod, path?: string) => {
+          if (method && path) circuitBreaker.reset(method + " " + path);
+          else circuitBreaker.reset();
+        },
       };
     },
 

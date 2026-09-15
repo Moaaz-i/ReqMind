@@ -12,6 +12,7 @@ ReqMind is a **request intelligence engine**: a drop-in wrapper around `fetch` t
 | [Cancellation & timeouts](cancellation-and-timeouts.md) | `cancel()`, external `AbortSignal`s, timeouts, error types |
 | [Cache invalidation](cache-invalidation.md) | Mutation invalidation, path/tag/predicate targets, auto-refetch |
 | [Intelligence engine](intelligence.md) | Observation → Decision → Action: live stats + adaptive timeout & SWR |
+| [Resilience](resilience.md) | Circuit breakers: per-endpoint fail-isolation, three states, circuit events |
 | [Events & lifecycle](events-and-lifecycle.md) | Every event, payloads, and the tracker state machine |
 | [Architecture](architecture.md) | Modules, data flow, and internal contracts |
 | [API reference](api-reference.md) | The complete, precise signature reference |
@@ -23,5 +24,6 @@ ReqMind is a **request intelligence engine**: a drop-in wrapper around `fetch` t
 - **v0.3.0** — Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch.
 - **v0.4.0** — Docs & hardening: docs suite + JSDoc, invalidation/refetch fixes.
 - **v0.5.0** — Intelligence engine: per-endpoint observation, `client.intelligence()`, adaptive timeout & stale-while-revalidate.
+- **v0.6.0** — Resilience engine: per-endpoint circuit breaker (closed/open/half-open), `circuit-*` events, `client.circuitBreaker()`, circuit stats on the intelligence board.
 
 Package entry point: [`@reqmind/core`](https://www.npmjs.com/package/@reqmind/core) — see [`packages/core/README.md`](../packages/core/README.md).

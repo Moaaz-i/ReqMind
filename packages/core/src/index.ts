@@ -15,11 +15,17 @@ export type {
   IntelligenceSnapshot,
   IntelligenceSummary,
 } from "./intelligence/intelligence.js";
+export { CircuitBreaker } from "./circuit/circuit-breaker.js";
+export type {
+  CircuitBreakerController,
+  CircuitState,
+  CircuitStatus,
+} from "./circuit/circuit-breaker.js";
 export { CacheStore } from "./cache/cache-store.js";
 export type { CacheEntry, RemovedEntry, InvalidationResult } from "./cache/cache-store.js";
 export { Deduper } from "./dedup/deduper.js";
 export { EventEmitter } from "./events/event-emitter.js";
-export { HttpError, TimeoutError, CancelledError, isAbortError } from "./errors.js";
+export { HttpError, TimeoutError, CancelledError, CircuitOpenError, isAbortError } from "./errors.js";
 export { decideRetry, resolveRetryOptions } from "./retry/policy.js";
 export type { RetryDecision, ResolvedRetryOptions } from "./retry/policy.js";
 export {
@@ -38,6 +44,7 @@ export type {
   CacheStrategy,
   CacheSubscriber,
   CacheUpdate,
+  CircuitBreakerOptions,
   ClientOptions,
   HttpMethod,
   IntelligenceOptions,

@@ -33,6 +33,7 @@ const api = createClient({
 | `timeout` | `number` | — | Default timeout in ms (0/absent = none) |
 | `fetch` | `typeof fetch` | global `fetch` | Custom fetch implementation (testing, mocking, adapters) |
 | `intelligence` | `IntelligenceOptions` | `{ enabled: true }` | Observation + adaptive behaviors ([guide](intelligence.md)) |
+| `circuitBreaker` | `CircuitBreakerOptions` | `{ enabled: true, failureThreshold: 5, resetTimeout: 10_000 }` | Per-endpoint fail isolation ([guide](resilience.md)) |
 
 ## Make requests
 

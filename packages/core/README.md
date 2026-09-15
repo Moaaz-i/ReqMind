@@ -15,6 +15,7 @@ A request intelligence engine for the fetch era: request deduplication, an offli
 | **v0.3.0** | Invalidation | Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch |
 | **v0.4.0** | Docs & hardening | Full documentation suite, JSDoc on the public API, invalidation/refetch fixes |
 | **v0.5.0** | Intelligence | `client.intelligence()` board, per-endpoint latency, adaptive timeout & stale-while-revalidate |
+| **v0.6.0** | Resilience | Per-endpoint circuit breaker (closed/open/half-open), `circuit-*` events, `client.circuitBreaker()` |
 
 ## Install
 
@@ -44,8 +45,6 @@ api.subscribe((key) => key.includes("/users"), (update) => {
 });
 await api.post("/users", { name: "Moaaz" });
 ```
-
-## Request intelligence
 
 ## Request intelligence
 
@@ -158,6 +157,25 @@ api.invalidate((meta) => meta.tags.includes("users")); // predicate
 api.invalidate("/users", { refetch: false });          // drop cache, skip refetch
 ```
 
+### Per-endpoint circuit breaker
+When an endpoint starts failing in bulk, its circuit trips and subsequent requests are rejected **before touching the network** — while other endpoints keep working normally. Three states per endpoint (`METHOD pathname`): `closed`, `open`, `halfOpen`.
+
+```ts
+const api = createClient({
+  circuitBreaker: { failureThreshold: 5, resetTimeout: 10_000 }, // default thresholds
+});
+
+api.circuitBreaker().status("GET", "/payments"); // { endpoint, state, consecutiveFailures, probing }
+api.circuitBreaker().statuses();
+api.circuitBreaker().reset("GET", "/payments");
+
+// 5xx, 429, timeouts and network errors count as failures; 4xx and cancellations do not.
+// Open circuits reject with CircuitOpenError and emit "circuit-rejected".
+api.on("circuit-open", ({ endpoint }) => slackAlert(endpoint));
+```
+
+A fresh cache hit is still served while a circuit is open; only requests that would hit the network are blocked. Circuit state is mirrored on the intelligence board (`summary.circuits`, `endpoint.circuit`).
+
 ### Lifecycle events
 
 ```ts
@@ -170,6 +188,10 @@ api.on("cache-hit",  ({ key }) => {});
 api.on("cache-write",({ key, response }) => {});
 api.on("invalidate", ({ keys, target }) => {});
 api.on("revalidate", ({ key, response }) => {});
+api.on("circuit-open",      ({ endpoint }) => {});
+api.on("circuit-half-open", ({ endpoint }) => {});
+api.on("circuit-closed",    ({ endpoint }) => {});
+api.on("circuit-rejected",  ({ endpoint, error }) => {});
 ```
 
 ## API surface
@@ -180,8 +202,10 @@ api.on("revalidate", ({ key, response }) => {});
 - `client.subscribe(matcher, listener)` → unsubscribe
 - `client.invalidate(target, { refetch })` → removed keys
 - `client.cancelAll()`, `client.clearCache()`
+- `client.intelligence()` → `IntelligenceController` (`snapshot()`, `endpoint(...)`, `reset()`)
+- `client.circuitBreaker()` → `CircuitBreakerController` (`status(...)`, `statuses()`, `reset(...)`)
 
-See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/INDEX.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), and the [intelligence engine](../docs/intelligence.md).
+See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/INDEX.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), the [intelligence engine](../docs/intelligence.md), and [resilience](../docs/resilience.md).
 
 ## License
 

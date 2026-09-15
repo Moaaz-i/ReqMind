@@ -19,6 +19,7 @@ interface ClientOptions {
   timeout?: number;
   fetch?: typeof fetch;
   intelligence?: IntelligenceOptions;
+  circuitBreaker?: CircuitBreakerOptions;
 }
 ```
 
@@ -31,6 +32,7 @@ interface ClientOptions {
 | `timeout` | `0` (none) | default per-attempt timeout in ms |
 | `fetch` | global `fetch` | inject a fetch implementation |
 | `intelligence` | `{ enabled: true }` | see `IntelligenceOptions` |
+| `circuitBreaker` | `{ enabled: true, failureThreshold: 5, resetTimeout: 10_000 }` | see `CircuitBreakerOptions` |
 
 ## `Client`
 
@@ -51,6 +53,7 @@ interface Client {
   cancelAll(): void;
   clearCache(): void;
   intelligence(): IntelligenceController;
+  circuitBreaker(): CircuitBreakerController;
 }
 ```
 
@@ -61,6 +64,41 @@ interface Client {
 - `delete` is typed like `get` (`Client["get"]`).
 - Every method returns a `CancellablePromise`.
 - `intelligence()` returns the observation board — see `IntelligenceController`.
+- `circuitBreaker()` returns the circuit board — see `CircuitBreakerController`.
+
+## `CircuitBreakerOptions`
+
+```ts
+interface CircuitBreakerOptions {
+  enabled?: boolean;              // default true
+  failureThreshold?: number;      // default 5 — consecutive countable failures to trip open
+  resetTimeout?: number;          // default 10_000 ms — how long a circuit stays open
+}
+```
+
+Deterministic: options are read once at client creation. Runtime mutation is **not** supported, and there is no adaptive circuit breaker yet.
+
+## `CircuitBreakerController`
+
+```ts
+interface CircuitBreakerController {
+  status(method: HttpMethod, path: string): CircuitStatus;  // read (and lazily create) a circuit
+  statuses(): CircuitStatus[];                              // every circuit ever observed
+  reset(method?: HttpMethod, path?: string): void;          // force back to closed (all if args omitted)
+}
+
+type CircuitState = "closed" | "open" | "halfOpen";
+
+interface CircuitStatus {
+  endpoint: string;                 // "METHOD pathname"
+  state: CircuitState;
+  consecutiveFailures: number;      // counted failures since the last success
+  openedAt?: number;                // when the circuit last opened (resetTimeout measured from here)
+  probing: boolean;                 // a half-open probe is currently in flight
+}
+```
+
+Guide: [resilience.md](resilience.md).
 
 ## `IntelligenceOptions`
 
@@ -193,6 +231,10 @@ interface ClientEvents {
   "cache-write": { key: string; response: ApiResponse };
   invalidate:  { keys: string[]; target: InvalidateTarget };
   revalidate:  { key: string; response: ApiResponse };
+  "circuit-open": { endpoint: string; method: HttpMethod; path: string };
+  "circuit-half-open": { endpoint: string; method: HttpMethod; path: string };
+  "circuit-closed": { endpoint: string; method: HttpMethod; path: string };
+  "circuit-rejected": { endpoint: string; method: HttpMethod; path: string; error: CircuitOpenError };
 }
 ```
 
@@ -242,6 +284,9 @@ class HttpError extends Error {
 }
 class TimeoutError extends Error {}
 class CancelledError extends Error {}
+class CircuitOpenError extends Error {
+  endpoint: string;   // "METHOD pathname" for which the circuit is open
+}
 function isAbortError(err: unknown): boolean;
 ```
 
@@ -266,4 +311,4 @@ function isAbortError(err: unknown): boolean;
 
 ## Index of types
 
-`HttpMethod`, `RequestState`, `CacheStrategy`, `ParamValue`, `RequestSpec`, `CacheOptions`, `RetryOptions`, `RequestOptions`, `ApiResponse`, `ClientOptions`, `CacheUpdate`, `CacheMeta`, `CacheSubscriber`, `InvalidateTarget`, `Client`, `ClientEvents`, `CancellablePromise`, `ResolvedCacheOptions`, `RetryDecision`, `ResolvedRetryOptions`, `CacheEntry`, `RemovedEntry`, `InvalidationResult`, `IntelligenceOptions`, `IntelligenceController`, `IntelligenceSummary`, `IntelligenceSnapshot`, `EndpointStats`, `IntelligenceRecommendation`.
+`HttpMethod`, `RequestState`, `CacheStrategy`, `ParamValue`, `RequestSpec`, `CacheOptions`, `RetryOptions`, `RequestOptions`, `ApiResponse`, `ClientOptions`, `CacheUpdate`, `CacheMeta`, `CacheSubscriber`, `InvalidateTarget`, `Client`, `ClientEvents`, `CancellablePromise`, `ResolvedCacheOptions`, `RetryDecision`, `ResolvedRetryOptions`, `CacheEntry`, `RemovedEntry`, `InvalidationResult`, `IntelligenceOptions`, `IntelligenceController`, `IntelligenceSummary`, `IntelligenceSnapshot`, `EndpointStats`, `IntelligenceRecommendation`, `CircuitBreakerOptions`, `CircuitBreakerController`, `CircuitState`, `CircuitStatus`.

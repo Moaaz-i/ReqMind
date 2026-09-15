@@ -18,6 +18,10 @@ api.on("cache-hit",   ({ key, tracker }) => {});
 api.on("cache-write", ({ key, response }) => {});
 api.on("invalidate",  ({ keys, target }) => {});
 api.on("revalidate",  ({ key, response }) => {});
+api.on("circuit-open",      ({ endpoint, method, path }) => {});
+api.on("circuit-half-open", ({ endpoint, method, path }) => {});
+api.on("circuit-closed",    ({ endpoint, method, path }) => {});
+api.on("circuit-rejected",  ({ endpoint, method, path, error }) => {});
 ```
 
 | Event | Payload | Fires when |
@@ -32,6 +36,12 @@ api.on("revalidate",  ({ key, response }) => {});
 | `cache-write` | `{ key, response }` | a fresh response was stored in the cache |
 | `revalidate` | `{ key, response }` | a background refetch (SWR or post-invalidation) landed a fresh copy |
 | `invalidate` | `{ keys, target }` | cache entries were invalidated; `target` is the `InvalidateTarget` used |
+| `circuit-open` | `{ endpoint, method, path }` | a circuit tripped: closed→open, or a failed probe reopened halfOpen→open |
+| `circuit-half-open` | `{ endpoint, method, path }` | a circuit admitted its first request past the reset window (open→halfOpen) |
+| `circuit-closed` | `{ endpoint, method, path }` | a half-open probe succeeded (halfOpen→closed) |
+| `circuit-rejected` | `{ endpoint, method, path, error }` | a request was blocked before sending because its circuit was open (`error` is a `CircuitOpenError`) |
+
+A rejected request is **never attempted**: it emits `circuit-rejected` (not `request`/`error`), touches no network socket, and rejects with `CircuitOpenError`. See the [resilience guide](resilience.md).
 
 Every `on()` returns an **unsubscribe** function:
 
