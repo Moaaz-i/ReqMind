@@ -14,6 +14,7 @@ A request intelligence engine for the fetch era: request deduplication, an offli
 | **v0.2.0** | SWR | Stale-while-revalidate + background refresh + cache subscription notifications |
 | **v0.3.0** | Invalidation | Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch |
 | **v0.4.0** | Docs & hardening | Full documentation suite, JSDoc on the public API, invalidation/refetch fixes |
+| **v0.5.0** | Intelligence | `client.intelligence()` board, per-endpoint latency, adaptive timeout & stale-while-revalidate |
 
 ## Install
 
@@ -45,6 +46,29 @@ await api.post("/users", { name: "Moaaz" });
 ```
 
 ## Request intelligence
+
+## Request intelligence
+
+The engine observes every request and can adapt — `client.intelligence()` gives you the live board:
+
+```ts
+const { summary, endpoints } = api.intelligence().snapshot();
+summary.cacheHitRate; summary.deduplicated; summary.retriesRecovered;
+summary.failures; summary.rateLimited; summary.timeouts; summary.activeRequests;
+
+api.intelligence().endpoint("GET", "/users")!.latency; // { avg, p50, p95, samples }
+```
+
+Adaptive behavior (opt-in), decided per endpoint from observed latency:
+
+```ts
+const api = createClient({
+  intelligence: {
+    adaptiveTimeout: true,              // timeout ≈ 3×p95 per endpoint
+    adaptiveStaleWhileRevalidate: true, // slow endpoints serve stale instantly
+  },
+});
+```
 
 ### Deduplication
 Concurrent identical reads are coalesced into **one** network call; every caller receives the same response. Only `GET`/`HEAD`/`OPTIONS` participate.
@@ -157,7 +181,7 @@ api.on("revalidate", ({ key, response }) => {});
 - `client.invalidate(target, { refetch })` → removed keys
 - `client.cancelAll()`, `client.clearCache()`
 
-See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/INDEX.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), and [invalidation](../docs/cache-invalidation.md).
+See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/INDEX.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), and the [intelligence engine](../docs/intelligence.md).
 
 ## License
 

@@ -78,6 +78,8 @@ export interface ClientOptions {
   timeout?: number;
   /** Custom fetch implementation (defaults to global fetch). */
   fetch?: typeof fetch;
+  /** Observation + adaptive behaviors (see IntelligenceOptions). */
+  intelligence?: IntelligenceOptions;
 }
 
 /** Update delivered to cache subscribers via `client.subscribe`. */
@@ -96,6 +98,16 @@ export interface CacheMeta {
   tags: string[];
   storedAt: number;
   expiresAt: number;
+}
+
+/** Engine-level intelligence: observation stats + adaptive behaviors. */
+export interface IntelligenceOptions {
+  /** Master switch for observation + adaptive behavior (default: true). */
+  enabled?: boolean;
+  /** Auto-tune per-endpoint timeouts from observed latency (default: false). */
+  adaptiveTimeout?: boolean;
+  /** Auto-enable stale-while-revalidate for slow endpoints (default: false). */
+  adaptiveStaleWhileRevalidate?: boolean;
 }
 
 export type CacheSubscriber<T = unknown> = (update: CacheUpdate<T>) => void;

@@ -7,6 +7,14 @@ export type {
 } from "./client/client.js";
 
 export { Tracker } from "./request/tracker.js";
+export { Intelligence } from "./intelligence/intelligence.js";
+export type {
+  EndpointStats,
+  IntelligenceController,
+  IntelligenceRecommendation,
+  IntelligenceSnapshot,
+  IntelligenceSummary,
+} from "./intelligence/intelligence.js";
 export { CacheStore } from "./cache/cache-store.js";
 export type { CacheEntry, RemovedEntry, InvalidationResult } from "./cache/cache-store.js";
 export { Deduper } from "./dedup/deduper.js";
@@ -32,6 +40,7 @@ export type {
   CacheUpdate,
   ClientOptions,
   HttpMethod,
+  IntelligenceOptions,
   InvalidateTarget,
   ParamValue,
   RequestOptions,

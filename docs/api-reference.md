@@ -18,6 +18,7 @@ interface ClientOptions {
   retry?: RetryOptions;
   timeout?: number;
   fetch?: typeof fetch;
+  intelligence?: IntelligenceOptions;
 }
 ```
 
@@ -29,6 +30,7 @@ interface ClientOptions {
 | `retry` | `{ attempts: 3, baseDelay: 1000, maxDelay: 30_000, backoff: "exponential", jitter: true, respectRetryAfter: true }` | see `RetryOptions` |
 | `timeout` | `0` (none) | default per-attempt timeout in ms |
 | `fetch` | global `fetch` | inject a fetch implementation |
+| `intelligence` | `{ enabled: true }` | see `IntelligenceOptions` |
 
 ## `Client`
 
@@ -48,6 +50,7 @@ interface Client {
   invalidate(target: InvalidateTarget, options?: { refetch?: boolean }): string[];
   cancelAll(): void;
   clearCache(): void;
+  intelligence(): IntelligenceController;
 }
 ```
 
@@ -57,6 +60,50 @@ interface Client {
 - `get`/`delete`/`head`/`options` take `(url, options)`; `post`/`put`/`patch` take `(url, body, options)`.
 - `delete` is typed like `get` (`Client["get"]`).
 - Every method returns a `CancellablePromise`.
+- `intelligence()` returns the observation board — see `IntelligenceController`.
+
+## `IntelligenceOptions`
+
+```ts
+interface IntelligenceOptions {
+  enabled?: boolean;                  // default true
+  adaptiveTimeout?: boolean;          // default false
+  adaptiveStaleWhileRevalidate?: boolean; // default false
+}
+```
+
+With `adaptiveTimeout`, once an endpoint has ≥ 5 latency samples the engine recommends a per-endpoint timeout of **3×p95** (100ms…60s floor/cap).
+With `adaptiveStaleWhileRevalidate`, endpoints whose p95 ≥ ~500ms are switched to stale-while-revalidate.
+Priority: explicit `RequestOptions.timeout`/`strategy` → adaptive → client default. Guide: [intelligence.md](intelligence.md).
+
+## `IntelligenceController`
+
+```ts
+interface IntelligenceController {
+  snapshot(): IntelligenceSnapshot;                    // summary + all endpoints
+  endpoint(method: string, pathname: string): EndpointStats | undefined;
+  reset(): void;                                       // clears observation history
+}
+
+interface IntelligenceSummary {
+  totalRequests; cacheHits; cacheMisses; deduplicated;
+  retriesPerformed; retriesRecovered; failures; rateLimited; timeouts; cancels;
+  activeRequests; cacheHitRate;         // cacheHits / totalRequests (0 if none)
+  dedupRate; retryRate; failureRate; rateLimitRate;
+}
+
+interface IntelligenceSnapshot {
+  summary: IntelligenceSummary;
+  endpoints: EndpointStats[];
+}
+
+interface EndpointStats {
+  method; path;
+  requests; successes; failures; cacheHits; cacheMisses; dedupPrevented;
+  retriesPerformed; retriesRecovered; rateLimited; timeouts; cancels;
+  latency: { avg: number; p50: number; p95: number; samples: number };
+}
+```
 
 ## `RequestOptions`
 
@@ -141,6 +188,7 @@ interface ClientEvents {
   error:       { key: string; tracker: Tracker; error: unknown };
   retry:       { key: string; tracker: Tracker; attempts: number; delay: number; error: HttpError };
   cancel:      { key: string; tracker: Tracker };
+  dedup:       { key: string; method: HttpMethod; url: string; consumers: number };
   "cache-hit": { key: string; tracker: Tracker };
   "cache-write": { key: string; response: ApiResponse };
   invalidate:  { keys: string[]; target: InvalidateTarget };
@@ -218,4 +266,4 @@ function isAbortError(err: unknown): boolean;
 
 ## Index of types
 
-`HttpMethod`, `RequestState`, `CacheStrategy`, `ParamValue`, `RequestSpec`, `CacheOptions`, `RetryOptions`, `RequestOptions`, `ApiResponse`, `ClientOptions`, `CacheUpdate`, `CacheMeta`, `CacheSubscriber`, `InvalidateTarget`, `Client`, `ClientEvents`, `CancellablePromise`, `ResolvedCacheOptions`, `RetryDecision`, `ResolvedRetryOptions`, `CacheEntry`, `RemovedEntry`, `InvalidationResult`.
+`HttpMethod`, `RequestState`, `CacheStrategy`, `ParamValue`, `RequestSpec`, `CacheOptions`, `RetryOptions`, `RequestOptions`, `ApiResponse`, `ClientOptions`, `CacheUpdate`, `CacheMeta`, `CacheSubscriber`, `InvalidateTarget`, `Client`, `ClientEvents`, `CancellablePromise`, `ResolvedCacheOptions`, `RetryDecision`, `ResolvedRetryOptions`, `CacheEntry`, `RemovedEntry`, `InvalidationResult`, `IntelligenceOptions`, `IntelligenceController`, `IntelligenceSummary`, `IntelligenceSnapshot`, `EndpointStats`, `IntelligenceRecommendation`.

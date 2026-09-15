@@ -13,6 +13,7 @@ api.on("retry",       ({ key, tracker, attempts, delay, error }) => {});
 api.on("success",     ({ key, tracker, response }) => {});
 api.on("error",       ({ key, tracker, error }) => {});
 api.on("cancel",      ({ key, tracker }) => {});
+api.on("dedup",       ({ key, method, url, consumers }) => {});
 api.on("cache-hit",   ({ key, tracker }) => {});
 api.on("cache-write", ({ key, response }) => {});
 api.on("invalidate",  ({ keys, target }) => {});
@@ -27,6 +28,7 @@ api.on("revalidate",  ({ key, response }) => {});
 | `success` | `{ key, tracker, response }` | a network attempt resolved with a `2xx` |
 | `error` | `{ key, tracker, error }` | a request failed (after retries exhausted) |
 | `cancel` | `{ key, tracker }` | a request was cancelled |
+| `dedup` | `{ key, method, url, consumers }` | a request joined an in-flight flight; `consumers` = waiters now sharing it |
 | `cache-write` | `{ key, response }` | a fresh response was stored in the cache |
 | `revalidate` | `{ key, response }` | a background refetch (SWR or post-invalidation) landed a fresh copy |
 | `invalidate` | `{ keys, target }` | cache entries were invalidated; `target` is the `InvalidateTarget` used |

@@ -13,6 +13,8 @@ import type {
 import { CacheStore } from "../cache/cache-store.js";
 import { Deduper } from "../dedup/deduper.js";
 import { EventEmitter } from "../events/event-emitter.js";
+import { Intelligence } from "../intelligence/intelligence.js";
+import type { IntelligenceController } from "../intelligence/intelligence.js";
 import { CancelledError, HttpError, TimeoutError } from "../errors.js";
 import { Tracker } from "../request/tracker.js";
 import { parseResponse } from "../request/response.js";
@@ -36,6 +38,8 @@ export interface ClientEvents {
   retry: { key: string; tracker: Tracker; attempts: number; delay: number; error: HttpError };
   /** A request was cancelled (cancel(), external signal, or abort). */
   cancel: { key: string; tracker: Tracker };
+  /** A request joined an in-flight duplicate instead of hitting the network. */
+  dedup: { key: string; method: HttpMethod; url: string; consumers: number };
   /** The response was served from cache (fresh read or SWR). */
   "cache-hit": { key: string; tracker: Tracker };
   /** A fresh response was stored in the cache. */
@@ -112,12 +116,13 @@ export interface Client {
 
   /** Subscribe to a lifecycle event. Returns an unsubscribe function. */
   on<K extends keyof ClientEvents>(event: K, listener: (payload: ClientEvents[K]) => void): () => void;
-  /**
-   * Watch a cache region. Matching keys are marked as "interesting" so that
-   * cache invalidation refetches them in the background. Returns an
-   * unsubscribe function.
-   */
+  /** Watch a cache region so mutation invalidation refetches matching keys. */
   subscribe<T>(matcher: (key: string) => boolean, listener: CacheSubscriber<T>): () => void;
+  /**
+   * Read the request intelligence engine: per-endpoint observations and the
+   * roll-up (cache hit rate, deduplication, retries, failures, latency).
+   */
+  intelligence(): IntelligenceController;
   /**
    * Invalidate cached entries by path (with children + query variants), tag,
    * or predicate. By default subscribed/tracked keys are refetched (disable
@@ -147,6 +152,8 @@ export function createClient(options: ClientOptions = {}): Client {
   const flightTrackers = new Map<string, Tracker>();
   /** Keys actively observed via `subscribe` — used to refetch after invalidation. */
   const interest = new Map<string, number>();
+  /** Observation + adaptive decision layer. */
+  const intelligence = new Intelligence(options.intelligence, events, () => flightTrackers.size);
 
   const defaultRetry: RetryOptions = { ...DEFAULT_RETRY, ...options.retry };
 
@@ -180,6 +187,7 @@ export function createClient(options: ClientOptions = {}): Client {
     const fetchURL = buildQuery(resolveURL(baseURL, url), requestOptions.params);
     const isRead = READ_METHODS.has(method);
     const cacheable = CACHEABLE_METHODS.has(method);
+    const recommendation = intelligence.recommend(method, urlPath(fetchURL));
 
     let retry: RetryOptions;
     if (requestOptions.retry === false) {
@@ -190,28 +198,26 @@ export function createClient(options: ClientOptions = {}): Client {
       retry = defaultRetry;
     }
 
-    const cacheEnabled = cacheable && requestOptions.cache !== false;
-    const cacheMerged: CacheOptions = {
-      ...resolveCache(options.cache),
-      ...(typeof requestOptions.cache === "object" ? requestOptions.cache : {}),
-    };
+    const cacheDefaults = resolveCache(options.cache);
+    const requestCacheObject = typeof requestOptions.cache === "object" ? requestOptions.cache : undefined;
+    const cacheEnabled =
+      cacheable && requestOptions.cache !== false && (requestCacheObject?.enabled ?? cacheDefaults.enabled);
+    const ttl = requestCacheObject?.ttl ?? cacheDefaults.ttl;
+    const strategy =
+      requestCacheObject?.strategy ?? recommendation.strategy ?? cacheDefaults.strategy;
 
     return {
       method,
       url: fetchURL,
       headers: mergedHeaders,
       body,
-      timeout: requestOptions.timeout ?? options.timeout,
+      timeout: requestOptions.timeout ?? recommendation.timeout ?? options.timeout,
       retry,
       tags: requestOptions.tags,
       key: getKey(method, fetchURL, mergedHeaders, body),
       isRead,
       cacheable,
-      cache: {
-        enabled: cacheEnabled && (cacheMerged.enabled ?? true),
-        ttl: cacheMerged.ttl ?? 30_000,
-        strategy: cacheMerged.strategy ?? "cache-first",
-      },
+      cache: { enabled: cacheEnabled, ttl, strategy },
     };
   }
 
@@ -457,7 +463,8 @@ export function createClient(options: ClientOptions = {}): Client {
         wireExternalCancel(requestOptions.signal, consumerTracker);
         events.emit("request", { key, method, url: spec.url, tracker: consumerTracker });
         consumerTracker.setState("pending");
-        deduper.attach(key, inflight.promise);
+        const joined = deduper.attach(key, inflight.promise);
+        events.emit("dedup", { key, method, url: spec.url, consumers: joined.consumers });
         const flight = awaitFlight<T>(inflight.promise, consumerTracker, key, false);
         return boxed(
           consumerTracker,
@@ -577,6 +584,14 @@ export function createClient(options: ClientOptions = {}): Client {
         }
       }
       return result.removedKeys;
+    },
+
+    intelligence() {
+      return {
+        snapshot: () => intelligence.snapshot(),
+        endpoint: (method: HttpMethod, path: string) => intelligence.endpoint(method, path),
+        reset: () => intelligence.reset(),
+      };
     },
 
     cancelAll() {

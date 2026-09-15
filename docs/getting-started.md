@@ -32,6 +32,7 @@ const api = createClient({
 | `retry` | `RetryOptions` | `{ attempts: 3, baseDelay: 1000, maxDelay: 30_000, backoff: "exponential", jitter: true, respectRetryAfter: true }` | Retry behavior |
 | `timeout` | `number` | — | Default timeout in ms (0/absent = none) |
 | `fetch` | `typeof fetch` | global `fetch` | Custom fetch implementation (testing, mocking, adapters) |
+| `intelligence` | `IntelligenceOptions` | `{ enabled: true }` | Observation + adaptive behaviors ([guide](intelligence.md)) |
 
 ## Make requests
 

@@ -18,6 +18,8 @@ src/
 │   └── cache-store.ts          # TTL cache + invalidation + subscriber bookkeeping
 ├── dedup/
 │   └── deduper.ts              # in-flight request coalescing
+├── intelligence/
+│   └── intelligence.ts         # observation → per-endpoint recommendations
 ├── retry/
 │   └── policy.ts               # decideRetry / resolveRetryOptions
 ├── events/
@@ -38,6 +40,7 @@ client.get(url, opts)
         ▼
    resolveSpec()          → merged headers/baseURL, cache+retry+timeout defaults,
                             canonical URL, fingerprint key
+                            ↳ intelligence.recommend(spec) → adaptive timeout/strategy
         │
         ├─ 1. CACHE
         │      peek(key)
@@ -104,17 +107,25 @@ interface CacheEntry<T> {
 | Far-future SWR with background refresh | Response-time predictability |
 | `.cancel()` on the returned promise (not `.abort()`) | Keeps the surface minimal and naming unambiguous |
 | `HttpError` carries `.status`, `.statusText`, `.headers` | Programmatic retry decisions need full context |
+| Intelligence listens to lifecycle events (never patched into fetch) | One source of truth; observation can't drift from execution |
+| Adaptive tips need ≥ 5 samples, `3×p95`, capped 100ms–60s | Avoids premature behavior changes from noisy single calls |
 | Dual ESM+CJS via `tsc` | No bundler dependency; simplest reliable dual build |
 
 ## Publishing & versioning
 
-- All three layers (MVP, SWR, invalidation) live in one codebase, released as `v0.1.0 → v0.2.0 → v0.3.0`.
+- All layers live in one codebase, released as `v0.1.0 → v0.4.0` (intelligence in `v0.5.0`).
 - CI: typecheck + test + build on every push; `npm publish` on `v*` tags using the `NPM_TOKEN` secret.
 
 ## Roadmap ideas
 
+- Circuit breaker / endpoint isolation (OPEN · HALF-OPEN · CLOSED) — `v0.6.0`
+- Advanced cache (persistent, custom stores) — `v0.7.x`
+- Observability (trace export, metrics hooks)
+- Devtools (timeline, cache inspector, latency replay)
 - Persistent cache (localStorage / in-memory polyfills)
 - `useQuery`-style React adapter (framework-agnostic here)
 - Request collision / mutation cancellation (cancel stale mutations)
 - Offline queue with sync
 - Response normalization callbacks (`transformResponse`)
+- WebSocket / streaming subscriptions
+- Request priority tiers (urgent, normal, background)

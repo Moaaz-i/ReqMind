@@ -85,6 +85,7 @@ api.on("revalidate", ({ key, response }) => { /* SWR refresh */ });
 - **v0.2.0** — Stale-while-revalidate with background refresh and cache subscription notifications.
 - **v0.3.0** — Mutation-driven cache invalidation (path / tag / predicate) with automatic refetch of subscribed and tracked keys, plus explicit `client.invalidate`.
 - **v0.4.0** — Docs & hardening: full docs suite + JSDoc on the public API, invalidation/refetch fixes.
+- **v0.5.0** — Intelligence engine: `client.intelligence()` board, per-endpoint latency, adaptive timeout & stale-while-revalidate.
 
 ## Documentation
 
@@ -95,6 +96,7 @@ api.on("revalidate", ({ key, response }) => { /* SWR refresh */ });
   - [Retries & backoff](docs/retries-and-backoff.md)
   - [Cancellation & timeouts](docs/cancellation-and-timeouts.md)
   - [Cache invalidation](docs/cache-invalidation.md)
+  - [Intelligence engine](docs/intelligence.md)
   - [Events & lifecycle](docs/events-and-lifecycle.md)
   - [Architecture](docs/architecture.md)
   - [API reference](docs/api-reference.md)
