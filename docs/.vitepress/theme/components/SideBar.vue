@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useData, useRoute } from "vitepress";
+import { useData, useRoute, withBase } from "vitepress";
 
 const { theme } = useData();
 const route = useRoute();
@@ -26,8 +26,8 @@ const order = computed(() => {
 });
 
 function isActive(link: string): boolean {
-  const target = link.replace(/\/$/, "");
-  if (target === "") return route.path === "/";
+  const target = withBase(link.replace(/\/$/, ""));
+  if (target === withBase("")) return route.path === withBase("/");
   return route.path === target || route.path.startsWith(target + "/");
 }
 </script>
@@ -41,7 +41,7 @@ function isActive(link: string): boolean {
         :key="item.link"
         class="side-item"
         :class="{ 'is-active': isActive(item.link) }"
-        :href="item.link"
+        :href="withBase(item.link)"
       >
         <span class="num">{{ String(order.get(item.link) ?? ii + 1).padStart(2, "0") }}</span>
         <span class="t">{{ item.title }}</span>

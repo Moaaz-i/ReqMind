@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useData } from "vitepress";
+import { useData, withBase } from "vitepress";
 
 const { theme } = useData();
 
@@ -40,7 +40,7 @@ const stack = [
       </p>
 
       <div class="home-actions">
-        <a class="btn btn-primary" href="/getting-started">Read the guide</a>
+        <a class="btn btn-primary" :href="withBase('/getting-started')">Read the guide</a>
         <a class="btn btn-ghost" :href="github || 'https://github.com/Moaaz-i/ReqMind'" target="_blank" rel="noopener">
           Source on GitHub
         </a>
@@ -59,7 +59,7 @@ const stack = [
           <h2>{{ group.section }}</h2>
           <ul>
             <li v-for="item in group.items" :key="item.link">
-              <a :href="item.link">
+              <a :href="withBase(item.link)">
                 <span class="guide-t">{{ item.title }}</span>
                 <span class="guide-d">{{ item.text }}</span>
               </a>

@@ -1,10 +1,14 @@
 import { defineConfig } from "vitepress";
 
+// Project page on GitHub Pages → /<repo>/; local/dev keeps base "/".
+const base = process.env.VITEPRESS_BASE ?? "/";
+
 export default defineConfig({
   lang: "en-US",
   title: "ReqMind",
   description:
     "A request intelligence engine for the fetch era — dedup, cache, SWR, retries, circuit breaking, and scheduling.",
+  base,
   cleanUrls: true,
   appearance: false,
   lastUpdated: true,
