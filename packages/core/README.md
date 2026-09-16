@@ -231,7 +231,7 @@ api.on("circuit-rejected",  ({ endpoint, error }) => {});
 - `client.scheduler()` → `SchedulerController` (`stats()`, `pauseGroup(...)`, `resumeGroup(...)`, `cancelGroup(...)`, `prioritize(...)`)
 - `client.cancelGroup(group)`
 
-See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/INDEX.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), the [intelligence engine](../docs/intelligence.md), [resilience](../docs/resilience.md), and the [scheduler](../docs/scheduler.md).
+See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/index.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), the [intelligence engine](../docs/intelligence.md), [resilience](../docs/resilience.md), and the [scheduler](../docs/scheduler.md).
 
 ## License
 

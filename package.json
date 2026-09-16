@@ -5,13 +5,17 @@
   "description": "Request Intelligence Engine — an infrastructure layer for HTTP requests",
   "license": "MIT",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "docs"
   ],
   "scripts": {
     "build": "npm run build -w @reqmind/core",
     "test": "npm run test -w @reqmind/core",
     "typecheck": "npm run typecheck -w @reqmind/core",
-    "clean": "npm run clean -w @reqmind/core"
+    "clean": "npm run clean -w @reqmind/core",
+    "docs:dev": "npm run dev -w @reqmind/docs",
+    "docs:build": "npm run build -w @reqmind/docs",
+    "docs:preview": "npm run preview -w @reqmind/docs"
   },
   "engines": {
     "node": ">=18"

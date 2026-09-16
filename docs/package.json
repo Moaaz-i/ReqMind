@@ -1,0 +1,15 @@
+{
+  "name": "@reqmind/docs",
+  "version": "0.7.0",
+  "private": true,
+  "type": "module",
+  "description": "ReqMind documentation site (VitePress)",
+  "scripts": {
+    "dev": "vitepress dev .",
+    "build": "vitepress build .",
+    "preview": "vitepress preview ."
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

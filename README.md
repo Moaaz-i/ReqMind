@@ -94,7 +94,7 @@ api.on("revalidate", ({ key, response }) => { /* SWR refresh */ });
 ## Documentation
 
 - Package docs (npm-facing): [`packages/core/README.md`](packages/core/README.md)
-- Docs index: [`docs/INDEX.md`](docs/INDEX.md)
+- Docs index: [`docs/index.md`](docs/index.md) — a **VitePress site** with a bespoke theme (`npm run docs:dev` to preview)
   - [Getting started](docs/getting-started.md)
   - [Request intelligence — dedup, cache & SWR](docs/request-intelligence.md)
   - [Retries & backoff](docs/retries-and-backoff.md)
@@ -118,6 +118,7 @@ npm install
 npm run typecheck   # tsc --noEmit across the workspace
 npm test            # vitest at packages/core
 npm run build       # dual ESM+CJS build at packages/core
+npm run docs:dev    # VitePress docs site (custom theme) at http://localhost:5173
 ```
 
 Framework-agnostic by design: bring your own fetch, storage, and layers.
