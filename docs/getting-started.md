@@ -34,6 +34,7 @@ const api = createClient({
 | `fetch` | `typeof fetch` | global `fetch` | Custom fetch implementation (testing, mocking, adapters) |
 | `intelligence` | `IntelligenceOptions` | `{ enabled: true }` | Observation + adaptive behaviors ([guide](intelligence.md)) |
 | `circuitBreaker` | `CircuitBreakerOptions` | `{ enabled: true, failureThreshold: 5, resetTimeout: 10_000 }` | Per-endpoint fail isolation ([guide](resilience.md)) |
+| `scheduler` | `SchedulerOptions` | — (disabled) | Opt-in traffic shaping: priority/concurrency/rate limits ([guide](scheduler.md)) |
 
 ## Make requests
 

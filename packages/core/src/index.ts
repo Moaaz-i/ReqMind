@@ -4,9 +4,12 @@ export type {
   ClientEvents,
   CancellablePromise,
   ResolvedCacheOptions,
+  SchedulerController,
 } from "./client/client.js";
 
 export { Tracker } from "./request/tracker.js";
+export { Scheduler } from "./scheduler/scheduler.js";
+export type { JobControl, ParkReason, SchedulerStats } from "./scheduler/scheduler.js";
 export { Intelligence } from "./intelligence/intelligence.js";
 export type {
   EndpointStats,
@@ -50,8 +53,12 @@ export type {
   IntelligenceOptions,
   InvalidateTarget,
   ParamValue,
+  Priority,
   RequestOptions,
   RequestSpec,
   RequestState,
   RetryOptions,
+  SchedulerOptions,
+  SchedulerRateLimitOptions,
+  SchedulerRequestOptions,
 } from "./types.js";

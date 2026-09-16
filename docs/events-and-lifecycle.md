@@ -22,6 +22,15 @@ api.on("circuit-open",      ({ endpoint, method, path }) => {});
 api.on("circuit-half-open", ({ endpoint, method, path }) => {});
 api.on("circuit-closed",    ({ endpoint, method, path }) => {});
 api.on("circuit-rejected",  ({ endpoint, method, path, error }) => {});
+api.on("request-queued",     ({ id, key, url, priority, position }) => {});
+api.on("request-dequeued",   ({ id, key, url, priority }) => {});
+api.on("request-started",    ({ id, key, url, priority }) => {});
+api.on("request-delayed",    ({ id, key, url, priority, reason, delay }) => {});
+api.on("request-scheduled",  ({ id, key, url, priority }) => {});
+api.on("request-prioritized",({ id, key, url, priority, from, to }) => {});
+api.on("request-rejected",   ({ id, key, url, priority, reason }) => {});
+api.on("queue-paused",       ({ group }) => {});
+api.on("queue-resumed",      ({ group }) => {});
 ```
 
 | Event | Payload | Fires when |
@@ -42,6 +51,22 @@ api.on("circuit-rejected",  ({ endpoint, method, path, error }) => {});
 | `circuit-rejected` | `{ endpoint, method, path, error }` | a request was blocked before sending because its circuit was open (`error` is a `CircuitOpenError`) |
 
 A rejected request is **never attempted**: it emits `circuit-rejected` (not `request`/`error`), touches no network socket, and rejects with `CircuitOpenError`. See the [resilience guide](resilience.md).
+
+### Scheduler events
+
+Fired only when the scheduler is enabled (with `scheduler` configured). In transparent (default) mode the scheduler is invisible and emits nothing. Guide: [scheduler.md](scheduler.md).
+
+| Event | Payload | Fires when |
+| --- | --- | --- |
+| `request-queued` | `{ id, key, method, url, priority, position }` | a request joined a priority lane |
+| `request-dequeued` | `{ id, key, method, url, priority }` | a queued request was selected and holds a network slot |
+| `request-started` | `{ id, key, method, url, priority }` | the scheduler began a network attempt |
+| `request-delayed` | `{ id, key, method, url, priority, reason, delay }` | a running request was parked (backoff / `Retry-After` / rate budget) and its slot freed; `reason` is `"retry"` \| `"retry-after"` \| `"rate-limit"` |
+| `request-scheduled` | `{ id, key, method, url, priority }` | a parked request's wait ended and it re-entered the queue |
+| `request-prioritized` | `{ id, key, method, url, priority, from, to }` | `prioritize()` moved a queued request between lanes |
+| `request-rejected` | `{ id, key, method, url, priority, reason }` | the scheduler dropped a request (queue cancellation); `reason: "cancelled"` |
+| `queue-paused` | `{ group }` | `pauseGroup` froze a group's queued work |
+| `queue-resumed` | `{ group }` | `resumeGroup` re-admitted a group |
 
 Every `on()` returns an **unsubscribe** function:
 

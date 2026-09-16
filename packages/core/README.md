@@ -16,6 +16,7 @@ A request intelligence engine for the fetch era: request deduplication, an offli
 | **v0.4.0** | Docs & hardening | Full documentation suite, JSDoc on the public API, invalidation/refetch fixes |
 | **v0.5.0** | Intelligence | `client.intelligence()` board, per-endpoint latency, adaptive timeout & stale-while-revalidate |
 | **v0.6.0** | Resilience | Per-endpoint circuit breaker (closed/open/half-open), `circuit-*` events, `client.circuitBreaker()` |
+| **v0.7.0** | Scheduler | Opt-in priority lanes, concurrency caps, rate limiting, queue groups — transparent by default |
 
 ## Install
 
@@ -176,6 +177,29 @@ api.on("circuit-open", ({ endpoint }) => slackAlert(endpoint));
 
 A fresh cache hit is still served while a circuit is open; only requests that would hit the network are blocked. Circuit state is mirrored on the intelligence board (`summary.circuits`, `endpoint.circuit`).
 
+### Request scheduler
+Opt-in traffic shaping: the client decides **when** a request touches the network. Priority lanes, global and per-host concurrency caps, client-side rate limiting, and queue groups.
+
+```ts
+const api = createClient({
+  scheduler: {
+    concurrency: 4,                    // at most 4 simultaneous network attempts
+    hosts: { "api.example.com": 2 },   // per-host cap
+    priority: true,                    // high:normal:low lanes serviced 4:2:1
+    rateLimit: { requests: 10, interval: 1_000 },
+  },
+});
+
+api.get("/urgent", { priority: "high" });                // priority lane
+api.get("/users", { scheduler: { group: "users-page" } }); // queue group
+api.scheduler().pauseGroup("users-page");                 // freeze queued work
+api.scheduler().cancelGroup("users-page");                // drop the group
+api.scheduler().prioritize("users-page", "high");         // re-prioritize queued jobs
+api.scheduler().stats();                                  // { active, queued, delayed, completed, rejected, lanes }
+```
+
+During a retry backoff or `Retry-After` wait, a running request **parks and frees its network slot** so queued work proceeds — the slot is never held while waiting. Scheduler events: `request-queued`, `request-dequeued`, `request-started`, `request-delayed`, `request-scheduled`, `request-prioritized`, `request-rejected`, `queue-paused`, `queue-resumed`. See [scheduler.md](../docs/scheduler.md).
+
 ### Lifecycle events
 
 ```ts
@@ -204,8 +228,10 @@ api.on("circuit-rejected",  ({ endpoint, error }) => {});
 - `client.cancelAll()`, `client.clearCache()`
 - `client.intelligence()` → `IntelligenceController` (`snapshot()`, `endpoint(...)`, `reset()`)
 - `client.circuitBreaker()` → `CircuitBreakerController` (`status(...)`, `statuses()`, `reset(...)`)
+- `client.scheduler()` → `SchedulerController` (`stats()`, `pauseGroup(...)`, `resumeGroup(...)`, `cancelGroup(...)`, `prioritize(...)`)
+- `client.cancelGroup(group)`
 
-See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/INDEX.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), the [intelligence engine](../docs/intelligence.md), and [resilience](../docs/resilience.md).
+See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/INDEX.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), the [intelligence engine](../docs/intelligence.md), [resilience](../docs/resilience.md), and the [scheduler](../docs/scheduler.md).
 
 ## License
 

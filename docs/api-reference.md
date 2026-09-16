@@ -20,6 +20,7 @@ interface ClientOptions {
   fetch?: typeof fetch;
   intelligence?: IntelligenceOptions;
   circuitBreaker?: CircuitBreakerOptions;
+  scheduler?: SchedulerOptions;
 }
 ```
 
@@ -33,6 +34,7 @@ interface ClientOptions {
 | `fetch` | global `fetch` | inject a fetch implementation |
 | `intelligence` | `{ enabled: true }` | see `IntelligenceOptions` |
 | `circuitBreaker` | `{ enabled: true, failureThreshold: 5, resetTimeout: 10_000 }` | see `CircuitBreakerOptions` |
+| `scheduler` | — (disabled) | see `SchedulerOptions` |
 
 ## `Client`
 
@@ -54,6 +56,8 @@ interface Client {
   clearCache(): void;
   intelligence(): IntelligenceController;
   circuitBreaker(): CircuitBreakerController;
+  scheduler(): SchedulerController;
+  cancelGroup(group: string): void;
 }
 ```
 
@@ -65,6 +69,8 @@ interface Client {
 - Every method returns a `CancellablePromise`.
 - `intelligence()` returns the observation board — see `IntelligenceController`.
 - `circuitBreaker()` returns the circuit board — see `CircuitBreakerController`.
+- `scheduler()` returns the traffic-shaping board — see `SchedulerController`.
+- `cancelGroup(group)` is shorthand for `scheduler().cancelGroup(group)`.
 
 ## `CircuitBreakerOptions`
 
@@ -99,6 +105,51 @@ interface CircuitStatus {
 ```
 
 Guide: [resilience.md](resilience.md).
+
+## `SchedulerOptions`
+
+```ts
+interface SchedulerOptions {
+  enabled?: boolean;            // default true — the option's presence enables the scheduler
+  concurrency?: number;         // max simultaneous network attempts; default 8
+  priority?: boolean;           // enable high/normal/low lanes; default false (single FIFO queue)
+  hosts?: Record<string, number>;   // per-host concurrency caps (hostname → max)
+  rateLimit?: SchedulerRateLimitOptions;
+}
+
+interface SchedulerRateLimitOptions {
+  requests: number;   // max network attempts per window
+  interval: number;   // window length in ms
+}
+```
+
+Opt-in: without this option (or with `enabled: false`) the client is byte-identical to a scheduler-less client.
+
+## `SchedulerController`
+
+```ts
+interface SchedulerController {
+  stats(): SchedulerStats;              // lived counters (below)
+  pauseGroup(group: string): void;      // freeze queued work in a group (running requests finish)
+  resumeGroup(group: string): void;     // re-admit a paused group
+  cancelGroup(group: string): void;     // drop every queued/parked/running request in a group
+  prioritize(selector: string, priority: Priority): number; // move matching queued jobs to a lane
+}
+
+type Priority = "high" | "normal" | "low";
+
+interface SchedulerStats {
+  active: number;       // holding a network slot right now
+  queued: number;       // waiting in the priority lanes
+  delayed: number;      // parked until a future moment
+  completed: number;    // finished their full lifecycle
+  rejected: number;     // dropped by the scheduler (group/all cancellation)
+  lanes: Record<Priority, number>;
+}
+```
+
+- `prioritize` selects queued jobs by **queue group name or request key** and returns how many moved. It requires `priority: true`.
+- `cancelGroup` cancels queued, parked, and running jobs alike. Guide: [scheduler.md](scheduler.md).
 
 ## `IntelligenceOptions`
 
@@ -158,6 +209,8 @@ interface RequestOptions {
   cache?: boolean | CacheOptions;
   retry?: boolean | RetryOptions;
   tags?: string[];
+  priority?: Priority;                    // "high" | "normal" | "low" (used when scheduler.priority is true)
+  scheduler?: { group: string };          // queue group for pause/resume/cancel/prioritize
 }
 
 type ParamValue = string | number | boolean | null | undefined;
@@ -171,6 +224,8 @@ type ParamValue = string | number | boolean | null | undefined;
 | `retry: false` | fail on first attempt |
 | `signal` | external abort handle; an already-aborted signal rejects immediately |
 | `tags` | joined with the path during mutation invalidation |
+| `priority` | route into a priority lane (ignored when `scheduler.priority` is false) |
+| `scheduler.group` | queue group membership — control it as one unit |
 
 ## `CacheOptions`
 
@@ -235,6 +290,15 @@ interface ClientEvents {
   "circuit-half-open": { endpoint: string; method: HttpMethod; path: string };
   "circuit-closed": { endpoint: string; method: HttpMethod; path: string };
   "circuit-rejected": { endpoint: string; method: HttpMethod; path: string; error: CircuitOpenError };
+  "request-queued": { id: number; key: string; method: HttpMethod; url: string; priority: Priority; position: number };
+  "request-dequeued": { id: number; key: string; method: HttpMethod; url: string; priority: Priority };
+  "request-started": { id: number; key: string; method: HttpMethod; url: string; priority: Priority };
+  "request-delayed": { id: number; key: string; method: HttpMethod; url: string; priority: Priority; reason: ParkReason; delay: number };
+  "request-scheduled": { id: number; key: string; method: HttpMethod; url: string; priority: Priority };
+  "request-prioritized": { id: number; key: string; method: HttpMethod; url: string; priority: Priority; from: Priority; to: Priority };
+  "request-rejected": { id: number; key: string; method: HttpMethod; url: string; priority: Priority; reason: "cancelled" };
+  "queue-paused": { group?: string };
+  "queue-resumed": { group?: string };
 }
 ```
 
@@ -311,4 +375,4 @@ function isAbortError(err: unknown): boolean;
 
 ## Index of types
 
-`HttpMethod`, `RequestState`, `CacheStrategy`, `ParamValue`, `RequestSpec`, `CacheOptions`, `RetryOptions`, `RequestOptions`, `ApiResponse`, `ClientOptions`, `CacheUpdate`, `CacheMeta`, `CacheSubscriber`, `InvalidateTarget`, `Client`, `ClientEvents`, `CancellablePromise`, `ResolvedCacheOptions`, `RetryDecision`, `ResolvedRetryOptions`, `CacheEntry`, `RemovedEntry`, `InvalidationResult`, `IntelligenceOptions`, `IntelligenceController`, `IntelligenceSummary`, `IntelligenceSnapshot`, `EndpointStats`, `IntelligenceRecommendation`, `CircuitBreakerOptions`, `CircuitBreakerController`, `CircuitState`, `CircuitStatus`.
+`HttpMethod`, `RequestState`, `CacheStrategy`, `ParamValue`, `RequestSpec`, `CacheOptions`, `RetryOptions`, `RequestOptions`, `ApiResponse`, `ClientOptions`, `CacheUpdate`, `CacheMeta`, `CacheSubscriber`, `InvalidateTarget`, `Client`, `ClientEvents`, `CancellablePromise`, `ResolvedCacheOptions`, `RetryDecision`, `ResolvedRetryOptions`, `CacheEntry`, `RemovedEntry`, `InvalidationResult`, `IntelligenceOptions`, `IntelligenceController`, `IntelligenceSummary`, `IntelligenceSnapshot`, `EndpointStats`, `IntelligenceRecommendation`, `CircuitBreakerOptions`, `CircuitBreakerController`, `CircuitState`, `CircuitStatus`, `Priority`, `SchedulerOptions`, `SchedulerRateLimitOptions`, `SchedulerRequestOptions`, `SchedulerController`, `SchedulerStats`, `ParkReason`.

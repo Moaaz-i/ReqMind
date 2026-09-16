@@ -14,6 +14,9 @@ import { CacheStore } from "../cache/cache-store.js";
 import { Deduper } from "../dedup/deduper.js";
 import { CircuitBreaker } from "../circuit/circuit-breaker.js";
 import type { CircuitBreakerController } from "../circuit/circuit-breaker.js";
+import { Scheduler } from "../scheduler/scheduler.js";
+import type { JobControl, ParkReason, SchedulerStats } from "../scheduler/scheduler.js";
+import type { Priority } from "../types.js";
 import { EventEmitter } from "../events/event-emitter.js";
 import { Intelligence } from "../intelligence/intelligence.js";
 import type { IntelligenceController } from "../intelligence/intelligence.js";
@@ -28,6 +31,14 @@ import { isSuccessStatus } from "../utils/status.js";
 
 const READ_METHODS = new Set<HttpMethod>(["GET", "HEAD", "OPTIONS"]);
 const CACHEABLE_METHODS = new Set<HttpMethod>(["GET"]);
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
 
 export interface ClientEvents {
   /** A network flight is about to start (owner of the request). */
@@ -58,6 +69,60 @@ export interface ClientEvents {
   "circuit-closed": { endpoint: string; method: HttpMethod; path: string };
   /** A request was blocked before sending because its circuit was open. */
   "circuit-rejected": { endpoint: string; method: HttpMethod; path: string; error: CircuitOpenError };
+  /** The scheduler accepted a request into a priority lane. */
+  "request-queued": { id: number; key: string; method: HttpMethod; url: string; priority: Priority; position: number };
+  /** The scheduler admitted a queued request (holds a network slot). */
+  "request-dequeued": { id: number; key: string; method: HttpMethod; url: string; priority: Priority };
+  /** A request began a network attempt with a held slot. */
+  "request-started": { id: number; key: string; method: HttpMethod; url: string; priority: Priority };
+  /** A running request was parked (backoff / Retry-After / rate budget) and freed its slot. */
+  "request-delayed": {
+    id: number;
+    key: string;
+    method: HttpMethod;
+    url: string;
+    priority: Priority;
+    reason: ParkReason;
+    delay: number;
+  };
+  /** A delayed request's wait ended and it re-entered the queue. */
+  "request-scheduled": { id: number; key: string; method: HttpMethod; url: string; priority: Priority };
+  /** A queued request moved to another priority lane via `prioritize`. */
+  "request-prioritized": {
+    id: number;
+    key: string;
+    method: HttpMethod;
+    url: string;
+    priority: Priority;
+    from: Priority;
+    to: Priority;
+  };
+  /** The scheduler dropped a request (group/all cancellation). */
+  "request-rejected": {
+    id: number;
+    key: string;
+    method: HttpMethod;
+    url: string;
+    priority: Priority;
+    reason: "cancelled";
+  };
+  /** A queue group (or the whole queue when no group) stopped admitting requests. */
+  "queue-paused": { group?: string };
+  /** A queue group (or the whole queue when no group) resumed admitting requests. */
+  "queue-resumed": { group?: string };
+}
+
+/** Read/inspect and control the request scheduler (v0.7). */
+export interface SchedulerController {
+  stats(): SchedulerStats;
+  /** Freeze admission of queued requests belonging to a group. */
+  pauseGroup(group: string): void;
+  /** Re-admit queued requests belonging to a group. */
+  resumeGroup(group: string): void;
+  /** Cancel queued/parked/running requests belonging to a group. */
+  cancelGroup(group: string): void;
+  /** Move all queued requests matching a group name or key to a priority lane. */
+  prioritize(selector: string, priority: Priority): number;
 }
 
 /** A normal promise extended with a `.cancel()` method. */
@@ -145,6 +210,10 @@ export interface Client {
   clearCache(): void;
   /** Read/reset the per-endpoint circuit breaker state. */
   circuitBreaker(): CircuitBreakerController;
+  /** Inspect and control the request scheduler (priority, concurrency, rate limits, groups). */
+  scheduler(): SchedulerController;
+  /** Cancel every queued/parked/running request in a scheduler group. */
+  cancelGroup(group: string): void;
 }
 
 /**
@@ -166,6 +235,19 @@ export function createClient(options: ClientOptions = {}): Client {
   const interest = new Map<string, number>();
   /** Circuit breaker state per endpoint (`METHOD pathname`). */
   const circuitBreaker = new CircuitBreaker(options.circuitBreaker, events);
+  /** Traffic scheduler: decides when (and how many) requests touch the network. */
+  const scheduler = new Scheduler(options.scheduler, events, undefined, (meta) => {
+    const endpoint = meta.method + " " + urlPath(meta.url);
+    if (circuitBreaker.permits(endpoint)) return undefined;
+    const error = new CircuitOpenError(endpoint);
+    events.emit("circuit-rejected", {
+      endpoint,
+      method: meta.method,
+      path: urlPath(meta.url),
+      error,
+    });
+    return error;
+  });
   /** Observation + adaptive decision layer. */
   const intelligence = new Intelligence(
     options.intelligence,
@@ -242,9 +324,16 @@ export function createClient(options: ClientOptions = {}): Client {
 
   /**
    * Raw network execution with retry + timeout + cancellation.
+   * `control` lets the scheduler pause the request between attempts (freeing
+   * its network slot) so backoff/Retry-After waits never hold a slot.
    * Rejects with HttpError | TimeoutError | CancelledError.
    */
-  async function fetchNetwork(spec: RequestSpec, tracker: Tracker): Promise<ApiResponse> {
+  async function fetchNetwork(
+    spec: RequestSpec,
+    tracker: Tracker,
+    control: JobControl,
+    host: string,
+  ): Promise<ApiResponse> {
     const retry = resolveRetryOptions(spec.retry);
     const endpoint = spec.method + " " + urlPath(spec.url);
     let attempts = 0;
@@ -328,7 +417,9 @@ export function createClient(options: ClientOptions = {}): Client {
         delay: decision.delayMs,
         error: httpError,
       });
-      await delay(decision.delayMs, tracker.signal);
+      const reason: ParkReason =
+        retry.respectRetryAfter && httpError.headers?.has("retry-after") ? "retry-after" : "retry";
+      await control.park(decision.delayMs, reason);
     }
   }
 
@@ -419,6 +510,7 @@ export function createClient(options: ClientOptions = {}): Client {
   function refetchEntry(key: string, spec: RequestSpec, subscribers: Set<CacheSubscriber>): void {
     // Never probe or retry an endpoint the circuit is refusing to serve.
     const endpointKey = spec.method + " " + urlPath(spec.url);
+    const host = hostnameOf(spec.url);
     if (!circuitBreaker.beforeRequest(endpointKey).allowed) return;
 
     const tracker = new Tracker(key);
@@ -426,7 +518,21 @@ export function createClient(options: ClientOptions = {}): Client {
 
     const inflight = deduper.get(key);
     const flight =
-      inflight?.promise ?? deduper.attach(key, fetchNetwork(spec, tracker)).promise;
+      inflight?.promise ??
+      deduper.attach(
+        key,
+        scheduler.submit({
+          key,
+          method: spec.method,
+          url: spec.url,
+          host,
+          priority: "normal",
+          probe: true,
+          signal: tracker.signal,
+          abort: () => tracker.cancel(),
+          execute: (control) => fetchNetwork(spec, tracker, control, host),
+        }),
+      ).promise;
 
     flight
       .then((res) => {
@@ -539,9 +645,35 @@ export function createClient(options: ClientOptions = {}): Client {
     consumerTracker.setState("pending");
     flightTrackers.set(key, consumerTracker);
 
+    const host = hostnameOf(spec.url);
     const flight = spec.isRead
-      ? deduper.attach(key, fetchNetwork(spec, consumerTracker)).promise
-      : fetchNetwork(spec, consumerTracker);
+      ? deduper.attach(
+          key,
+          scheduler.submit({
+            key,
+            method,
+            url: spec.url,
+            host,
+            group: requestOptions.scheduler?.group,
+            priority: requestOptions.priority ?? "normal",
+            probe: verdict.probe,
+            signal: consumerTracker.signal,
+            abort: () => consumerTracker.cancel(),
+            execute: (control) => fetchNetwork(spec, consumerTracker, control, host),
+          }),
+        ).promise
+      : scheduler.submit({
+          key,
+          method,
+          url: spec.url,
+          host,
+          group: requestOptions.scheduler?.group,
+          priority: requestOptions.priority ?? "normal",
+          probe: verdict.probe,
+          signal: consumerTracker.signal,
+          abort: () => consumerTracker.cancel(),
+          execute: (control) => fetchNetwork(spec, consumerTracker, control, host),
+        });
 
     const chain = flight
       .then((res) => {
@@ -664,7 +796,22 @@ export function createClient(options: ClientOptions = {}): Client {
     cancelAll() {
       for (const tracker of flightTrackers.values()) tracker.cancel();
       flightTrackers.clear();
+      scheduler.cancelAll();
       deduper.clear();
+    },
+
+    scheduler(): SchedulerController {
+      return {
+        stats: () => scheduler.stats(),
+        pauseGroup: (group: string) => scheduler.pauseGroup(group),
+        resumeGroup: (group: string) => scheduler.resumeGroup(group),
+        cancelGroup: (group: string) => scheduler.cancelGroup(group),
+        prioritize: (selector: string, priority: Priority) => scheduler.prioritize(selector, priority),
+      };
+    },
+
+    cancelGroup(group: string) {
+      scheduler.cancelGroup(group);
     },
 
     clearCache() {

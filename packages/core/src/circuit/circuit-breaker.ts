@@ -92,6 +92,15 @@ export class CircuitBreaker {
     return { allowed: true, probe: true };
   }
 
+  /**
+   * Side-effect-free check: may a request that was queued hit the network for
+   * this endpoint right now? No transition, no probe claim — just a peek.
+   */
+  permits(endpoint: string): boolean {
+    if (!this.enabled) return true;
+    return this.status(endpoint).state === CLOSED;
+  }
+
   /** A network flight for this endpoint resolved successfully. */
   recordSuccess(endpoint: string): void {
     if (!this.enabled) return;

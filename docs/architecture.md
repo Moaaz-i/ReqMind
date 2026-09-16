@@ -22,6 +22,8 @@ src/
 │   └── intelligence.ts         # observation → per-endpoint recommendations
 ├── circuit/
 │   └── circuit-breaker.ts      # per-endpoint failure isolation (closed/open/halfOpen)
+├── scheduler/
+│   └── scheduler.ts            # priority lanes, concurrency caps, rate limits, groups
 ├── retry/
 │   └── policy.ts               # decideRetry / resolveRetryOptions
 ├── events/
@@ -57,16 +59,20 @@ client.get(url, opts)
         │        ├─ closed / open→halfOpen probe → proceed
         │        └─ open or probe in flight    → circuit-rejected + CircuitOpenError
         │
-        └─ 4. OWNER
-               deduper.attach(key, fetchNetwork(spec, tracker))
-                     │
-                     ▼
-                fetchNetwork()
-                  for each attempt:
-                    fetch(url, { signal: attemptController.signal })
-                      ✓ 2xx → parseResponse → afterSuccess (cache-write)
-                      ✗     → decideRetry → delay() → retry / throw
-                  tracker: idle→pending→retrying→success|error|cancelled
+        └─ 4. SCHEDULER (owner only)
+               scheduler.submit(job)
+                 ├─ transparent (no option) → run now, exactly like a plain client
+                 └─ enabled:
+                       lane push (FIFO within priority, WRR 4:2:1 across lanes)
+                         ↳ dedup already coalesced the flight → one scheduled attempt
+                         └─ on slot: circuit re-check (gate) → fetchNetwork
+                                 attempts:
+                                   fetch(url, { signal })
+                                     ✓ 2xx → parseResponse → afterSuccess (cache-write)
+                                     ✗ Retry-After / backoff / rate budget
+                                         → control.park(delay) → slot FREED
+                                         → re-queue when the wait ends
+                       tracker: idle→pending→retrying→success|error|cancelled
 ```
 
 ## Key contracts
@@ -104,6 +110,16 @@ interface CacheEntry<T> {
 - Its `signal` propagates to the current attempt's `AbortController`, so `cancel()`/external aborts/timeouts release the socket promptly.
 - One tracker per flight — deduped consumers get lightweight trackers that mirror outcomes.
 
+### Scheduler contracts
+
+- The scheduler gates **when** an executor runs; it never inspects cache, dedup, or circuit internals. Its only inputs are the job descriptor and a control handle.
+- Jobs wait in lanes (`high`/`normal`/`low`) as FIFO queues; selection is weighted round-robin (`4:2:1`). With `priority` off, all jobs land in a single `normal` lane (plain FIFO) and per-request priority / `prioritize()` are inert.
+- **Parking frees the slot**: `control.park(ms, reason)` releases the job's network slot while it waits (backoff, `Retry-After`, rate budget), re-queueing the job when the wait ends. Parked jobs show in `stats().delayed`, not `active`.
+- **Admission is re-gated.** A job that sits queued past the pre-start gate runs the `beforeStart` check (the client's circuit `permits()` peek) again: if the endpoint opened meanwhile, the job is rejected instead of touching the network. Half-open probes skip the gate so recovery can always proceed.
+- **Rate limit is a budget over attempts**, parked the same way as backoff — a rate-limited client holds no slots while waiting.
+- Host saturation leapfrogs: a job whose host is at its cap keeps its lane position but doesn't block other hosts' traffic.
+- Transparent mode (no `scheduler` option / `enabled: false`) runs executors immediately and emits no scheduler events — byte-identical to a scheduler-less client.
+
 ## Design decisions
 
 | Decision | Rationale |
@@ -121,16 +137,23 @@ interface CacheEntry<T> {
 | 4xx and cancellation are not countable failures | They describe a bad request or caller intent, not a failing server |
 | Adaptive tips need ≥ 5 samples, `3×p95`, capped 100ms–60s | Avoids premature behavior changes from noisy single calls |
 | The circuit breaker is deterministic and configured once (no runtime mutation, no adaptive breaker yet) | Predictable isolation; adaptive decisions arrive with the intelligence engine |
+| The scheduler is opt-in and transparent by default | Existing scheduler-less clients are byte-identical; shaping must be explicitly requested |
+| `priority: true` uses weighted round-robin (4:2:1), not pure strict priority | Guarantees low-priority traffic is never starved by a high-priority flood |
+| Parked jobs (backoff / `Retry-After` / rate budget) free their network slot | Waits shouldn't occupy the scarce resource they're waiting on |
+| The circuit gate re-runs when a long-queued job is about to start | A queued request must not hit an endpoint whose circuit opened while it waited |
+| Dedup coalescence spans the scheduler queue | N identical queued requests share one scheduled network attempt |
+| No batching in v0.7; every request is its own attempt | Batching composes differently with caching/SSE; deferred to adaptive v0.8 |
 | Dual ESM+CJS via `tsc` | No bundler dependency; simplest reliable dual build |
 
 ## Publishing & versioning
 
-- All layers live in one codebase, released as `v0.1.0 → v0.4.0` (intelligence in `v0.5.0`, circuit breaker in `v0.6.0`).
+- All layers live in one codebase, released as `v0.1.0 → v0.4.0` (intelligence in `v0.5.0`, circuit breaker in `v0.6.0`, request scheduler in `v0.7.0`).
 - CI: typecheck + test + build on every push; `npm publish` on `v*` tags using the `NPM_TOKEN` secret.
 
 ## Roadmap ideas
 
-- Advanced cache (persistent, custom stores) — `v0.7.x`
+- Adaptive scheduling (batching, latency-aware rate) — `v0.8.x`
+- Advanced cache (persistent, custom stores) — `v0.8.x`
 - Observability (trace export, metrics hooks)
 - Devtools (timeline, cache inspector, latency replay)
 - Persistent cache (localStorage / in-memory polyfills)
@@ -139,4 +162,3 @@ interface CacheEntry<T> {
 - Offline queue with sync
 - Response normalization callbacks (`transformResponse`)
 - WebSocket / streaming subscriptions
-- Request priority tiers (urgent, normal, background)

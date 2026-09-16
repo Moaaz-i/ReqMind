@@ -55,6 +55,46 @@ export interface CircuitBreakerOptions {
 
 export type ParamValue = string | number | boolean | null | undefined;
 
+/** Traffic priority for a request (used when the scheduler's `priority` option is enabled). */
+export type Priority = "high" | "normal" | "low";
+
+/** Client-side attempt budget: at most `requests` network attempts per `interval` ms. */
+export interface SchedulerRateLimitOptions {
+  requests: number;
+  interval: number;
+}
+
+/**
+ * When & how requests are sent. Deterministic, opt-in: when the `scheduler`
+ * option is absent the client behaves exactly as without a scheduler.
+ */
+export interface SchedulerOptions {
+  /** Master switch (default: true — the option's presence enables the scheduler). */
+  enabled?: boolean;
+  /** Max concurrent network attempts at the client level (default: 8). */
+  concurrency?: number;
+  /**
+   * Enable high/normal/low priority lanes. When false (default) every request
+   * shares a single FIFO queue and request-level `priority` / `prioritize()`
+   * are inert. When true, lanes are serviced weighted round-robin (4:2:1) so
+   * low-priority traffic is never starved.
+   */
+  priority?: boolean;
+  /** Per-host concurrency caps: hostname → max concurrent attempts. */
+  hosts?: Record<string, number>;
+  /** Client-side rate limiting for network attempts (default: none). */
+  rateLimit?: SchedulerRateLimitOptions;
+}
+
+/** Per-request scheduler hints. */
+export interface SchedulerRequestOptions {
+  /**
+   * Logical group (e.g. a page/component) that can be paused, resumed,
+   * cancelled, or re-prioritized as one unit via `client.scheduler`.
+   */
+  group?: string;
+}
+
 /** Per-request configuration. Overrides client defaults. */
 export interface RequestOptions {
   method: HttpMethod;
@@ -70,6 +110,10 @@ export interface RequestOptions {
   retry?: boolean | RetryOptions;
   /** Tags joined with the request path during mutation-driven invalidation. */
   tags?: string[];
+  /** Traffic priority (used when the scheduler's `priority` option is enabled). */
+  priority?: Priority;
+  /** Per-request scheduler hints (group assignment). */
+  scheduler?: SchedulerRequestOptions;
 }
 
 /** A resolved response carrying parsed body and HTTP metadata. */
@@ -92,6 +136,8 @@ export interface ClientOptions {
   intelligence?: IntelligenceOptions;
   /** Circuit breaker policy per endpoint (see CircuitBreakerOptions). */
   circuitBreaker?: CircuitBreakerOptions;
+  /** Traffic shaping: priority, concurrency, per-host caps, rate limiting (see SchedulerOptions). */
+  scheduler?: SchedulerOptions;
 }
 
 /** Update delivered to cache subscribers via `client.subscribe`. */
