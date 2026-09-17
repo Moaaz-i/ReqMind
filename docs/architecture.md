@@ -20,6 +20,12 @@ src/
 │   └── deduper.ts              # in-flight request coalescing
 ├── intelligence/
 │   └── intelligence.ts         # observation → per-endpoint recommendations
+├── adaptive/
+│   ├── decisions.ts            # EndpointAdaptiveState + AdaptiveHealth types
+│   ├── signals.ts              # bounded per-endpoint rings → percentile summary
+│   ├── policies.ts             # evaluateConcurrency / evaluateThrottle / evaluateStrategy (pure)
+│   ├── engine.ts               # per-endpoint profiles, decisions, event wiring, flush
+│   └── controllers.ts          # client.adaptive() surface
 ├── circuit/
 │   └── circuit-breaker.ts      # per-endpoint failure isolation (closed/open/halfOpen)
 ├── scheduler/
@@ -45,6 +51,7 @@ client.get(url, opts)
    resolveSpec()          → merged headers/baseURL, cache+retry+timeout defaults,
                             canonical URL, fingerprint key
                             ↳ intelligence.recommend(spec) → adaptive timeout/strategy
+                            ↳ adaptive.cacheStrategy(...) → SWR for degraded endpoints
         │
         ├─ 1. CACHE
         │      peek(key)
@@ -112,13 +119,22 @@ interface CacheEntry<T> {
 
 ### Scheduler contracts
 
-- The scheduler gates **when** an executor runs; it never inspects cache, dedup, or circuit internals. Its only inputs are the job descriptor and a control handle.
+- The scheduler gates **when** an executor runs; it never inspects cache, dedup, circuit, or adaptive internals. Its only inputs are the job descriptor and a control handle.
+- Per-endpoint ceilings come from a **callback**, `endpointLimit(endpoint)`, which the client wires from the Adaptive Engine's `endpointCeiling`. Without an `adaptive` block the callback returns `undefined` and every endpoint uses the global ceiling.
+- Half-open probes bypass the adaptive ceiling, exactly like the circuit gate.
 - Jobs wait in lanes (`high`/`normal`/`low`) as FIFO queues; selection is weighted round-robin (`4:2:1`). With `priority` off, all jobs land in a single `normal` lane (plain FIFO) and per-request priority / `prioritize()` are inert.
 - **Parking frees the slot**: `control.park(ms, reason)` releases the job's network slot while it waits (backoff, `Retry-After`, rate budget), re-queueing the job when the wait ends. Parked jobs show in `stats().delayed`, not `active`.
 - **Admission is re-gated.** A job that sits queued past the pre-start gate runs the `beforeStart` check (the client's circuit `permits()` peek) again: if the endpoint opened meanwhile, the job is rejected instead of touching the network. Half-open probes skip the gate so recovery can always proceed.
 - **Rate limit is a budget over attempts**, parked the same way as backoff — a rate-limited client holds no slots while waiting.
 - Host saturation leapfrogs: a job whose host is at its cap keeps its lane position but doesn't block other hosts' traffic.
 - Transparent mode (no `scheduler` option / `enabled: false`) runs executors immediately and emits no scheduler events — byte-identical to a scheduler-less client.
+
+### Adaptive engine contracts
+
+- The engine is fed by lifecycle events, never patched into fetch: latency clamped between `request-started` (or `request`) and the terminal `success`/`error`/`request-delayed`; outcomes classify into `ok` / `error` / `rateLimited`; `cache-hit` is ignored so cache-only consumers pass through unmeasured.
+- Signals live in bounded per-endpoint rings (`latencyWindow` latency samples, `outcomeWindow` outcomes) summarized as p95/avg plus error and 429 ratios.
+- Decisions are pure functions of `(signals, state, policy)`: deterministic, ±1 steps, gated on consecutive windows plus a cooldown, with a hysteresis deadband between the high/low latency thresholds — the ceiling cannot oscillate.
+- The engine only **suggests**: the scheduler applies `endpointCeiling`, the retry loop applies `retryMultiplier` (server `Retry-After` always wins), and `resolveSpec` prefers request-level strategy over the engine's SWR recommendation.
 
 ## Design decisions
 
@@ -143,11 +159,16 @@ interface CacheEntry<T> {
 | The circuit gate re-runs when a long-queued job is about to start | A queued request must not hit an endpoint whose circuit opened while it waited |
 | Dedup coalescence spans the scheduler queue | N identical queued requests share one scheduled network attempt |
 | No batching in v0.7; every request is its own attempt | Batching composes differently with caching/SSE; deferred to adaptive v0.8 |
+| Adaptive Engine is deterministic, opt-in, and modular (`src/adaptive/`, not inside the scheduler) | Same input → same decision; ✱ the scheduler gains only an `endpointLimit` callback |
+| Concurrency moves in steps of ±1 with hysteresis + cooldown | One-step, damped changes that cannot sawtooth |
+| 429 throttling enters instantly, releases after `recoverySamples` clean windows | Defends against bursty throttling without over-releasing |
+| Server `Retry-After` overrides the adaptive backoff multiplier | Server deadlines always beat client heuristics |
+| Latency measured end-to-end from real lifecycle events | Observation cannot drift from actual execution |
 | Dual ESM+CJS via `tsc` | No bundler dependency; simplest reliable dual build |
 
 ## Publishing & versioning
 
-- All layers live in one codebase, released as `v0.1.0 → v0.4.0` (intelligence in `v0.5.0`, circuit breaker in `v0.6.0`, request scheduler in `v0.7.0`).
+- All layers live in one codebase, released as `v0.1.0 → v0.4.0` (intelligence in `v0.5.0`, circuit breaker in `v0.6.0`, request scheduler in `v0.7.0`, adaptive engine in `v0.8.0`).
 - CI: typecheck + test + build on every push; `npm publish` on `v*` tags using the `NPM_TOKEN` secret.
 
 ## Roadmap ideas

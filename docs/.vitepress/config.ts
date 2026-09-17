@@ -26,7 +26,7 @@ export default defineConfig({
     docTitle: "ReqMind",
     docSubtitle: "request intelligence engine",
     github: "https://github.com/Moaaz-i/ReqMind",
-    version: "v0.7.0",
+    version: "v0.8.0",
     guides: [
       {
         section: "Start",
@@ -44,6 +44,7 @@ export default defineConfig({
           { title: "Intelligence", text: "Observation → Decision → Action, adaptive timeout & SWR", link: "/intelligence" },
           { title: "Resilience", text: "Circuit breakers — per-endpoint failure isolation", link: "/resilience" },
           { title: "Scheduler", text: "Priority lanes, concurrency, rate limits, queue groups", link: "/scheduler" },
+          { title: "Adaptive engine", text: "Per-endpoint concurrency, 429 throttling, adaptive retry & SWR", link: "/adaptive" },
         ],
       },
       {

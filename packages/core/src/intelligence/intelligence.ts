@@ -1,4 +1,4 @@
-import type { CacheStrategy, HttpMethod, IntelligenceOptions } from "../types.js";
+import type { AdaptiveMetrics, CacheStrategy, HttpMethod, IntelligenceOptions } from "../types.js";
 import type { ClientEvents } from "../client/client.js";
 import type { EventEmitter } from "../events/event-emitter.js";
 import type { Tracker } from "../request/tracker.js";
@@ -67,6 +67,8 @@ export interface IntelligenceSummary {
   circuitRejected: number;
   /** Circuit states across every known endpoint circuit. */
   circuits: { open: number; halfOpen: number; closed: number };
+  /** v0.8 Adaptive Engine counters (zeroed until the client merges real values). */
+  adaptive: AdaptiveMetrics;
 }
 
 /** Full intelligence readout: roll-up + per-endpoint table. */
@@ -285,6 +287,7 @@ export class Intelligence {
       cancels: sum(this.endpoints, (s) => s.stats.cancels),
       circuitRejected: sum(this.endpoints, (s) => s.stats.circuitRejected),
       circuits: circuitCounts,
+      adaptive: emptyAdaptiveMetrics(),
     };
   }
 
@@ -345,5 +348,16 @@ function emptySummary(activeRequests: number): IntelligenceSummary {
     cancels: 0,
     circuitRejected: 0,
     circuits: { open: 0, halfOpen: 0, closed: 0 },
+    adaptive: emptyAdaptiveMetrics(),
+  };
+}
+
+function emptyAdaptiveMetrics(): AdaptiveMetrics {
+  return {
+    decisions: 0,
+    concurrencyReductions: 0,
+    concurrencyRecoveries: 0,
+    throttles: 0,
+    retryChanges: 0,
   };
 }

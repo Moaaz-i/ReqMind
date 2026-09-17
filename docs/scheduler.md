@@ -135,7 +135,7 @@ start → dedup join (a queued duplicate joins and waits) → circuit gate (reje
 
 ## Design notes
 
-- **Deterministic.** All shaping is fixed or rule-based; nothing adapts at runtime. (Adaptive batching/scheduling is a v0.8 candidate.)
+- **Deterministic.** All shaping is fixed or rule-based; nothing adapts at runtime. (With the [adaptive engine](adaptive.md) enabled, per-endpoint concurrency ceilings evolve deterministically through an `endpointLimit` callback.)
 - **No batching.** Each request stays its own network attempt; only scheduling is shared.
 - **Transparent default.** Without the option the client is byte-for-byte the scheduler-less client.
 

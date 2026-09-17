@@ -21,6 +21,7 @@ interface ClientOptions {
   intelligence?: IntelligenceOptions;
   circuitBreaker?: CircuitBreakerOptions;
   scheduler?: SchedulerOptions;
+  adaptive?: AdaptiveOptions;
 }
 ```
 
@@ -35,6 +36,7 @@ interface ClientOptions {
 | `intelligence` | `{ enabled: true }` | see `IntelligenceOptions` |
 | `circuitBreaker` | `{ enabled: true, failureThreshold: 5, resetTimeout: 10_000 }` | see `CircuitBreakerOptions` |
 | `scheduler` | — (disabled) | see `SchedulerOptions` |
+| `adaptive` | — (disabled) | see `AdaptiveOptions` |
 
 ## `Client`
 
@@ -57,6 +59,7 @@ interface Client {
   intelligence(): IntelligenceController;
   circuitBreaker(): CircuitBreakerController;
   scheduler(): SchedulerController;
+  adaptive(): AdaptiveController;
   cancelGroup(group: string): void;
 }
 ```
@@ -70,6 +73,7 @@ interface Client {
 - `intelligence()` returns the observation board — see `IntelligenceController`.
 - `circuitBreaker()` returns the circuit board — see `CircuitBreakerController`.
 - `scheduler()` returns the traffic-shaping board — see `SchedulerController`.
+- `adaptive()` returns the adaptive readout — see `AdaptiveController`.
 - `cancelGroup(group)` is shorthand for `scheduler().cancelGroup(group)`.
 
 ## `CircuitBreakerOptions`
@@ -151,6 +155,76 @@ interface SchedulerStats {
 - `prioritize` selects queued jobs by **queue group name or request key** and returns how many moved. It requires `priority: true`.
 - `cancelGroup` cancels queued, parked, and running jobs alike. Guide: [scheduler.md](scheduler.md).
 
+## `AdaptiveOptions`
+
+```ts
+interface AdaptiveOptions {
+  enabled?: boolean;                    // master switch; default false
+  concurrency?: boolean;                // per-endpoint scheduler ceiling (default false)
+  retry?: boolean;                      // scale retry backoff while throttled (default false)
+  rateLimit?: boolean;                  // 429 throttling / release (default false)
+  staleWhileRevalidate?: boolean;       // SWR reads for degraded endpoints (default false)
+  highLatencyMs?: number;               // p95 ≥ this → pressured; default 2000
+  lowLatencyMs?: number;                // p95 < this → healthy; default 1000 (deadband between)
+  degradeSamples?: number;              // multiplied bad windows before a reduction; default 3
+  recoverySamples?: number;             // clean windows before a +1 recovery / throttle release; default 3
+  changeCooldown?: number;              // min windows between two decisions per endpoint; default 2
+  minConcurrency?: number;              // floor for the effective ceiling; default 1
+  rateLimitRatio?: number;              // 429 share flagging throttling pressure; default 0.2
+  errorRatio?: number;                  // error share flagging pressure; default 0.1
+  backoffFactor?: number;               // retry backoff multiplier while throttled; default 2
+  maxBackoffMs?: number;                // cap for the adapted base delay; default 10_000
+  swrLatencyMs?: number;                // p95 ≥ this flips reads to SWR; default 1500
+  latencyWindow?: number;               // latency ring size (min 4); default 64
+  outcomeWindow?: number;               // outcome ring size (min 2); default 32
+}
+```
+
+Deterministic: same observed signals always yield the same decision. With the block absent or `enabled: false` the client is byte-identical to a v0.7 client. Guide: [adaptive.md](adaptive.md).
+
+## `AdaptiveController`
+
+```ts
+interface AdaptiveController {
+  snapshot(): { enabled: boolean; endpoints: Record<string, EndpointAdaptiveState> };
+  endpoint(method: HttpMethod, path: string): EndpointAdaptiveState | undefined;
+  metrics(): AdaptiveMetrics;           // rolled-up counters
+  reset(): void;                        // forget every learned profile
+}
+
+type AdaptiveHealth = "good" | "recovering" | "degraded" | "throttled";
+
+interface EndpointAdaptiveState {
+  endpoint: string;                     // "METHOD pathname"
+  configured: number;                   // the scheduler's original ceiling
+  effective: number;                    // ceiling applied right now
+  mode: "nominal" | "reducing" | "recovering";
+  health: AdaptiveHealth;
+  reason: string;                       // explainable decision
+  retryMultiplier: number;              // backoff multiplier while throttled
+  retryMode: "nominal" | "throttled";
+  retryReason: string;
+  strategy?: CacheStrategy;             // "stale-while-revalidate" once engaged
+  strategyReason: string;
+  signals: {
+    avg: number; p50: number; p95: number; samples: number;
+    errorRatio: number; rateLimitRatio: number; active: number;
+  };
+  degradedSince?: number;
+  counters: AdaptiveMetrics;
+}
+
+interface AdaptiveMetrics {
+  decisions: number;                    // reductions + recoveries + throttles
+  concurrencyReductions: number;
+  concurrencyRecoveries: number;
+  throttles: number;                    // endpoints entered throttled mode
+  retryChanges: number;                 // retry multiplier changes
+}
+```
+
+`adaptive.metrics()` is also surfaced as `intelligence().snapshot().summary.adaptive`.
+
 ## `IntelligenceOptions`
 
 ```ts
@@ -179,6 +253,7 @@ interface IntelligenceSummary {
   retriesPerformed; retriesRecovered; failures; rateLimited; timeouts; cancels;
   activeRequests; cacheHitRate;         // cacheHits / totalRequests (0 if none)
   dedupRate; retryRate; failureRate; rateLimitRate;
+  adaptive: AdaptiveMetrics;            // rolled-up adaptive counters
 }
 
 interface IntelligenceSnapshot {
@@ -375,4 +450,4 @@ function isAbortError(err: unknown): boolean;
 
 ## Index of types
 
-`HttpMethod`, `RequestState`, `CacheStrategy`, `ParamValue`, `RequestSpec`, `CacheOptions`, `RetryOptions`, `RequestOptions`, `ApiResponse`, `ClientOptions`, `CacheUpdate`, `CacheMeta`, `CacheSubscriber`, `InvalidateTarget`, `Client`, `ClientEvents`, `CancellablePromise`, `ResolvedCacheOptions`, `RetryDecision`, `ResolvedRetryOptions`, `CacheEntry`, `RemovedEntry`, `InvalidationResult`, `IntelligenceOptions`, `IntelligenceController`, `IntelligenceSummary`, `IntelligenceSnapshot`, `EndpointStats`, `IntelligenceRecommendation`, `CircuitBreakerOptions`, `CircuitBreakerController`, `CircuitState`, `CircuitStatus`, `Priority`, `SchedulerOptions`, `SchedulerRateLimitOptions`, `SchedulerRequestOptions`, `SchedulerController`, `SchedulerStats`, `ParkReason`.
+`HttpMethod`, `RequestState`, `CacheStrategy`, `ParamValue`, `RequestSpec`, `CacheOptions`, `RetryOptions`, `RequestOptions`, `ApiResponse`, `ClientOptions`, `CacheUpdate`, `CacheMeta`, `CacheSubscriber`, `InvalidateTarget`, `Client`, `ClientEvents`, `CancellablePromise`, `ResolvedCacheOptions`, `RetryDecision`, `ResolvedRetryOptions`, `CacheEntry`, `RemovedEntry`, `InvalidationResult`, `IntelligenceOptions`, `IntelligenceController`, `IntelligenceSummary`, `IntelligenceSnapshot`, `EndpointStats`, `IntelligenceRecommendation`, `CircuitBreakerOptions`, `CircuitBreakerController`, `CircuitState`, `CircuitStatus`, `Priority`, `SchedulerOptions`, `SchedulerRateLimitOptions`, `SchedulerRequestOptions`, `SchedulerController`, `SchedulerStats`, `ParkReason`, `AdaptiveOptions`, `AdaptiveController`, `AdaptiveHealth`, `EndpointAdaptiveState`, `AdaptiveMetrics`.

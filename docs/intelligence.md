@@ -56,6 +56,14 @@ Latency is **end-to-end** (a response that needed two attempts counts the whole 
 client.intelligence().reset(); // clear history
 ```
 
+Since v0.8.0 the board also rolls up the [Adaptive Engine's](adaptive.md) counters:
+
+```ts
+summary.adaptive; // { decisions, concurrencyReductions, concurrencyRecoveries, throttles, retryChanges }
+```
+
+These count the deterministic per-endpoint adaptations — see [the adaptive guide](adaptive.md) for the full readout.
+
 ## Adaptive behavior
 
 Observation becomes **action** through per-endpoint recommendations:

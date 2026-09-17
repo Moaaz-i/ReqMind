@@ -20,10 +20,13 @@ import type { Priority } from "../types.js";
 import { EventEmitter } from "../events/event-emitter.js";
 import { Intelligence } from "../intelligence/intelligence.js";
 import type { IntelligenceController } from "../intelligence/intelligence.js";
+import { AdaptiveEngine } from "../adaptive/engine.js";
+import type { AdaptiveController } from "../adaptive/controllers.js";
 import { CancelledError, CircuitOpenError, HttpError, TimeoutError } from "../errors.js";
 import { Tracker } from "../request/tracker.js";
 import { parseResponse } from "../request/response.js";
 import { resolveRetryOptions, decideRetry } from "../retry/policy.js";
+import type { ResolvedRetryOptions, RetryDecision } from "../retry/policy.js";
 import { createFingerprint } from "../utils/fingerprint.js";
 import { buildQuery, resolveURL, urlPath } from "../utils/url.js";
 import { delay } from "../utils/timing.js";
@@ -38,6 +41,27 @@ function hostnameOf(url: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * Retry decision with an adaptive backoff multiplier (v0.8). When the
+ * endpoint is throttled, the base delay is scaled by the engine's multiplier
+ * (within the user's `maxDelay`). A server Retry-After header always wins and
+ * is applied untouched by `decideRetry`.
+ */
+function decideRetryWithAdaptive(
+  endpoint: string,
+  retry: ResolvedRetryOptions,
+  attempts: number,
+  error: HttpError,
+  adaptive: AdaptiveEngine,
+): RetryDecision {
+  const multiplier = adaptive.retryMultiplier(endpoint);
+  const scaledRetry =
+    multiplier > 1
+      ? { ...retry, baseDelay: Math.max(100, Math.min(retry.maxDelay, retry.baseDelay * multiplier)) }
+      : retry;
+  return decideRetry({ error, options: scaledRetry, attempts });
 }
 
 export interface ClientEvents {
@@ -146,6 +170,8 @@ interface ResolvedSpec extends RequestSpec {
 }
 
 const DEFAULT_CACHE: CacheOptions = { enabled: true, ttl: 30_000, strategy: "cache-first" };
+/** Client-wide concurrency default, mirroring `SchedulerOptions.concurrency`. */
+const DEFAULT_SCHEDULER_CONCURRENCY = 8;
 const DEFAULT_RETRY: RetryOptions = {
   attempts: 3,
   baseDelay: 1000,
@@ -212,6 +238,8 @@ export interface Client {
   circuitBreaker(): CircuitBreakerController;
   /** Inspect and control the request scheduler (priority, concurrency, rate limits, groups). */
   scheduler(): SchedulerController;
+  /** Read/reset the v0.8 Adaptive Engine: per-endpoint decisions with explainable reasons. */
+  adaptive(): AdaptiveController;
   /** Cancel every queued/parked/running request in a scheduler group. */
   cancelGroup(group: string): void;
 }
@@ -236,24 +264,37 @@ export function createClient(options: ClientOptions = {}): Client {
   /** Circuit breaker state per endpoint (`METHOD pathname`). */
   const circuitBreaker = new CircuitBreaker(options.circuitBreaker, events);
   /** Traffic scheduler: decides when (and how many) requests touch the network. */
-  const scheduler = new Scheduler(options.scheduler, events, undefined, (meta) => {
-    const endpoint = meta.method + " " + urlPath(meta.url);
-    if (circuitBreaker.permits(endpoint)) return undefined;
-    const error = new CircuitOpenError(endpoint);
-    events.emit("circuit-rejected", {
-      endpoint,
-      method: meta.method,
-      path: urlPath(meta.url),
-      error,
-    });
-    return error;
-  });
+  const scheduler = new Scheduler(
+    options.scheduler,
+    events,
+    undefined,
+    (meta) => {
+      const endpoint = meta.method + " " + urlPath(meta.url);
+      if (circuitBreaker.permits(endpoint)) return undefined;
+      const error = new CircuitOpenError(endpoint);
+      events.emit("circuit-rejected", {
+        endpoint,
+        method: meta.method,
+        path: urlPath(meta.url),
+        error,
+      });
+      return error;
+    },
+    (endpoint) => adaptive.endpointCeiling(endpoint),
+  );
   /** Observation + adaptive decision layer. */
   const intelligence = new Intelligence(
     options.intelligence,
     events,
     () => flightTrackers.size,
     (method, path) => circuitBreaker.status(method + " " + path),
+  );
+  /** v0.8 Adaptive Engine: deterministic per-endpoint traffic shaping (opt-in). */
+  const adaptive = new AdaptiveEngine(
+    options.adaptive,
+    options.scheduler?.enabled !== false,
+    options.scheduler?.concurrency ?? DEFAULT_SCHEDULER_CONCURRENCY,
+    events,
   );
 
   const defaultRetry: RetryOptions = { ...DEFAULT_RETRY, ...options.retry };
@@ -305,7 +346,7 @@ export function createClient(options: ClientOptions = {}): Client {
       cacheable && requestOptions.cache !== false && (requestCacheObject?.enabled ?? cacheDefaults.enabled);
     const ttl = requestCacheObject?.ttl ?? cacheDefaults.ttl;
     const strategy =
-      requestCacheObject?.strategy ?? recommendation.strategy ?? cacheDefaults.strategy;
+      requestCacheObject?.strategy ?? adaptive.cacheStrategy(method, urlPath(fetchURL)) ?? recommendation.strategy ?? cacheDefaults.strategy;
 
     return {
       method,
@@ -402,7 +443,7 @@ export function createClient(options: ClientOptions = {}): Client {
         response.headers,
       );
 
-      const decision = decideRetry({ error: httpError, options: retry, attempts });
+      const decision = decideRetryWithAdaptive(endpoint, retry, attempts, httpError, adaptive);
       if (!decision.shouldRetry) {
         tracker.setState("error");
         circuitBreaker.recordFailure(endpoint, httpError);
@@ -776,9 +817,24 @@ export function createClient(options: ClientOptions = {}): Client {
 
     intelligence() {
       return {
-        snapshot: () => intelligence.snapshot(),
+        snapshot: () => {
+          const base = intelligence.snapshot();
+          return {
+            ...base,
+            summary: { ...base.summary, adaptive: adaptive.metrics() },
+          };
+        },
         endpoint: (method: HttpMethod, path: string) => intelligence.endpoint(method, path),
         reset: () => intelligence.reset(),
+      };
+    },
+
+    adaptive(): AdaptiveController {
+      return {
+        snapshot: () => adaptive.snapshot(),
+        endpoint: (method: HttpMethod, path: string) => adaptive.endpoint(method + " " + path),
+        metrics: () => adaptive.metrics(),
+        reset: () => adaptive.reset(),
       };
     },
 

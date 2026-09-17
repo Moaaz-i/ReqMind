@@ -31,6 +31,9 @@ export { EventEmitter } from "./events/event-emitter.js";
 export { HttpError, TimeoutError, CancelledError, CircuitOpenError, isAbortError } from "./errors.js";
 export { decideRetry, resolveRetryOptions } from "./retry/policy.js";
 export type { RetryDecision, ResolvedRetryOptions } from "./retry/policy.js";
+export { AdaptiveEngine } from "./adaptive/engine.js";
+export type { AdaptiveController } from "./adaptive/controllers.js";
+export type { EndpointAdaptiveState, AdaptiveHealth } from "./adaptive/decisions.js";
 export {
   isRetriableStatus,
   isSuccessStatus,
@@ -41,6 +44,8 @@ export { createFingerprint } from "./utils/fingerprint.js";
 export { canonicalizeURL, buildQuery, resolveURL } from "./utils/url.js";
 
 export type {
+  AdaptiveMetrics,
+  AdaptiveOptions,
   ApiResponse,
   CacheMeta,
   CacheOptions,

@@ -53,6 +53,67 @@ export interface CircuitBreakerOptions {
   resetTimeout?: number;
 }
 
+/**
+ * v0.8 Adaptive Engine: deterministic (never ML), explainable traffic shaping.
+ *
+ * This is a manual, inspectable layer — not heuristics coupled to the
+ * scheduler. Every behavior is opt-in and every decision carries a human
+ * readable `reason`. With the whole block absent or `enabled: false` the
+ * client behaves exactly as it did in v0.7.
+ */
+export interface AdaptiveOptions {
+  /** Master switch for all adaptive behavior (default: false). */
+  enabled?: boolean;
+  /** Adapt the per-endpoint scheduler concurrency ceiling (default: false). */
+  concurrency?: boolean;
+  /** Scale retry backoff while an endpoint is under pressure (default: false). */
+  retry?: boolean;
+  /** React to 429 pressure by throttling an endpoint (default: false). */
+  rateLimit?: boolean;
+  /** Prefer stale-while-revalidate reads while an endpoint is degraded (default: false). */
+  staleWhileRevalidate?: boolean;
+  /** p95 latency (ms) at/above which an endpoint is considered degraded (default: 2000). */
+  highLatencyMs?: number;
+  /** p95 latency (ms) below which an endpoint is healthy again (default: 1000). */
+  lowLatencyMs?: number;
+  /** Consecutive "bad" windows required before the first reduction (default: 3). */
+  degradeSamples?: number;
+  /** Consecutive healthy windows required before each +1 recovery step (default: 3). */
+  recoverySamples?: number;
+  /** Minimum windows between two consecutive decisions per endpoint (default: 2). */
+  changeCooldown?: number;
+  /** Floor for the effective concurrency ceiling (default: 1). */
+  minConcurrency?: number;
+  /** 429 share of the outcome window that flags rate-limit pressure (default: 0.2). */
+  rateLimitRatio?: number;
+  /** Failure share of the outcome window that flags high-error pressure (default: 0.1). */
+  errorRatio?: number;
+  /** Backoff multiplier applied while an endpoint is throttled (default: 2). */
+  backoffFactor?: number;
+  /** Cap for an adapted retry baseDelay in ms (default: 10_000). */
+  maxBackoffMs?: number;
+  /** Degraded p95 latency (ms) at which reads flip to stale-while-revalidate (default: 1500). */
+  swrLatencyMs?: number;
+  /** Latency samples kept per endpoint ring (default: 64). */
+  latencyWindow?: number;
+  /** Outcome samples kept for pressure ratios (default: 32). */
+  outcomeWindow?: number;
+}
+
+/** Rolled-up adaptive counters exposed on `intelligence().snapshot()`. */
+export interface AdaptiveMetrics {
+  /** Number of effective decisions (reductions + recoveries + throttle changes). */
+  decisions: number;
+  /** Times an endpoint's effective concurrency was reduced by one. */
+  concurrencyReductions: number;
+  /** Times an endpoint's effective concurrency grew back by one. */
+  concurrencyRecoveries: number;
+  /** Times an endpoint entered throttled mode under 429 pressure. */
+  throttles: number;
+  /** Times an endpoint's retry backoff multiplier changed. */
+  retryChanges: number;
+}
+
 export type ParamValue = string | number | boolean | null | undefined;
 
 /** Traffic priority for a request (used when the scheduler's `priority` option is enabled). */
@@ -134,6 +195,8 @@ export interface ClientOptions {
   fetch?: typeof fetch;
   /** Observation + adaptive behaviors (see IntelligenceOptions). */
   intelligence?: IntelligenceOptions;
+  /** Adaptive Engine (v0.8): deterministic per-endpoint traffic shaping (see AdaptiveOptions). */
+  adaptive?: AdaptiveOptions;
   /** Circuit breaker policy per endpoint (see CircuitBreakerOptions). */
   circuitBreaker?: CircuitBreakerOptions;
   /** Traffic shaping: priority, concurrency, per-host caps, rate limiting (see SchedulerOptions). */

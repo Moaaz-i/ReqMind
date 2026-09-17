@@ -3,6 +3,7 @@ import type { ClientEvents } from "../client/client.js";
 import type { HttpMethod, Priority, SchedulerOptions, SchedulerRateLimitOptions } from "../types.js";
 import { CancelledError } from "../errors.js";
 import { delay } from "../utils/timing.js";
+import { urlPath } from "../utils/url.js";
 
 export type ParkReason = "retry" | "retry-after" | "rate-limit";
 
@@ -124,20 +125,29 @@ export class Scheduler {
   private nextId = 1;
   private readonly getNow: () => number;
   private readonly beforeStart?: (meta: StartCheckMeta) => unknown | undefined;
+  /**
+   * Optional per-endpoint concurrency ceiling supplied by the Adaptive
+   * Engine (v0.8). Returning undefined falls back to the configured
+   * client-wide concurrency. `undefined` here means no endpoint cap.
+   */
+  private readonly endpointLimit?: (endpoint: string) => number | undefined;
+  private readonly endpointActive = new Map<string, number>();
 
   constructor(
     options: SchedulerOptions | undefined,
     private readonly events: EventEmitter<ClientEvents>,
     getNow: () => number = Date.now,
     beforeStart?: (meta: StartCheckMeta) => unknown | undefined,
+    endpointLimit?: (endpoint: string) => number | undefined,
   ) {
     this.enabled = options !== undefined && options.enabled !== false;
     this.priorityEnabled = options?.priority ?? false;
-    this.concurrency = options?.concurrency ?? 8;
+    this.concurrency = Math.max(1, options?.concurrency ?? 8);
     this.hosts = options?.hosts ?? {};
     this.rateLimit = options?.rateLimit;
     this.getNow = getNow;
     this.beforeStart = beforeStart;
+    this.endpointLimit = endpointLimit;
     // priority: false → a single `normal` lane (plain FIFO; request-level
     // priorities and `prioritize()` are inert). priority: true → weighted
     // round-robin across high/normal/low (4:2:1) so low-priority traffic is
@@ -330,10 +340,28 @@ export class Scheduler {
         // A host-saturated job keeps its lane position but must not block
         // traffic for other hosts — leapfrog it until its host frees up.
         if (this.hostSaturated(job.host)) continue;
+        // Endpoint-level adaptive ceiling: a degraded endpoint is throttled
+        // the same way. Half-open probes are always admitted so the circuit
+        // can actually test recovery.
+        if (!job.probe && this.endpointSaturated(job)) continue;
         return job;
       }
     }
     return undefined;
+  }
+
+  private endpointOf(job: Job): string {
+    return job.method + " " + urlPath(job.url);
+  }
+
+  private endpointLimitFor(endpoint: string): number {
+    if (!this.endpointLimit) return this.concurrency;
+    return Math.min(this.concurrency, this.endpointLimit(endpoint) ?? this.concurrency);
+  }
+
+  private endpointSaturated(job: Job): boolean {
+    const endpoint = this.endpointOf(job);
+    return (this.endpointActive.get(endpoint) ?? 0) >= this.endpointLimitFor(endpoint);
   }
 
   private admit(job: Job): void {
@@ -354,6 +382,8 @@ export class Scheduler {
     job.phase = "running";
     this.active += 1;
     this.hostActive.set(job.host, (this.hostActive.get(job.host) ?? 0) + 1);
+    const endpoint = this.endpointOf(job);
+    this.endpointActive.set(endpoint, (this.endpointActive.get(endpoint) ?? 0) + 1);
     this.rateHistory.push(this.getNow());
     this.events.emit("request-dequeued", this.base(job));
     this.events.emit("request-started", this.base(job));
@@ -436,6 +466,10 @@ export class Scheduler {
     const current = this.hostActive.get(job.host) ?? 0;
     if (current <= 1) this.hostActive.delete(job.host);
     else this.hostActive.set(job.host, current - 1);
+    const endpoint = this.endpointOf(job);
+    const endpointCurrent = this.endpointActive.get(endpoint) ?? 0;
+    if (endpointCurrent <= 1) this.endpointActive.delete(endpoint);
+    else this.endpointActive.set(endpoint, endpointCurrent - 1);
   }
 
   private handleAbort(job: Job): void {

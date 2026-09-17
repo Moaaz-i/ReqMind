@@ -17,6 +17,7 @@ A request intelligence engine for the fetch era: request deduplication, an offli
 | **v0.5.0** | Intelligence | `client.intelligence()` board, per-endpoint latency, adaptive timeout & stale-while-revalidate |
 | **v0.6.0** | Resilience | Per-endpoint circuit breaker (closed/open/half-open), `circuit-*` events, `client.circuitBreaker()` |
 | **v0.7.0** | Scheduler | Opt-in priority lanes, concurrency caps, rate limiting, queue groups — transparent by default |
+| **v0.8.0** | Adaptive | Deterministic per-endpoint concurrency ceilings, 429 throttling, adaptive retry & SWR — off by default, explainable |
 
 ## Install
 
@@ -200,6 +201,31 @@ api.scheduler().stats();                                  // { active, queued, d
 
 During a retry backoff or `Retry-After` wait, a running request **parks and frees its network slot** so queued work proceeds — the slot is never held while waiting. Scheduler events: `request-queued`, `request-dequeued`, `request-started`, `request-delayed`, `request-scheduled`, `request-prioritized`, `request-rejected`, `queue-paused`, `queue-resumed`. See [scheduler.md](../docs/scheduler.md).
 
+### Adaptive engine
+Deterministic (never AI), per-endpoint traffic shaping. The scheduler's concurrency becomes a per-endpoint **ceiling** that steps down/up by exactly 1 (hysteresis + cooldown = no oscillation), 429 pressure throttles retry backoff vs immediate release after clean windows, and degraded endpoints serve stale-while-revalidate reads. Off by default: without the block the client is byte-identical to v0.7.
+
+```ts
+const api = createClient({
+  scheduler: { enabled: true, concurrency: 6 },
+  adaptive: {
+    enabled: true,
+    concurrency: true,           // adapt the per-endpoint ceiling
+    retry: true,                 // scale backoff while throttled
+    rateLimit: true,             // 429 throttling + release
+    staleWhileRevalidate: true,  // SWR for degraded endpoints
+  },
+});
+
+// The readout explains every decision:
+api.adaptive().endpoint("GET", "/search");
+// { endpoint: "GET /search", configured: 6, effective: 5, mode: "reducing",
+//   reason: "p95 latency 3840ms is at/above the 2000ms ceiling for 3 windows", … }
+api.adaptive().metrics();                 // rolled-up counters
+api.intelligence().snapshot().summary.adaptive;  // same counters
+```
+
+Server `Retry-After` always wins over the adaptive backoff multiplier. See [adaptive.md](../docs/adaptive.md).
+
 ### Lifecycle events
 
 ```ts
@@ -229,9 +255,10 @@ api.on("circuit-rejected",  ({ endpoint, error }) => {});
 - `client.intelligence()` → `IntelligenceController` (`snapshot()`, `endpoint(...)`, `reset()`)
 - `client.circuitBreaker()` → `CircuitBreakerController` (`status(...)`, `statuses()`, `reset(...)`)
 - `client.scheduler()` → `SchedulerController` (`stats()`, `pauseGroup(...)`, `resumeGroup(...)`, `cancelGroup(...)`, `prioritize(...)`)
+- `client.adaptive()` → `AdaptiveController` (`snapshot()`, `endpoint(...)`, `metrics()`, `reset()`)
 - `client.cancelGroup(group)`
 
-See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/index.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), the [intelligence engine](../docs/intelligence.md), [resilience](../docs/resilience.md), and the [scheduler](../docs/scheduler.md).
+See [docs/api-reference.md](../docs/api-reference.md) for the full reference, and the [docs](../docs/index.md) folder for deep guides on [caching & SWR](../docs/request-intelligence.md), [retries](../docs/retries-and-backoff.md), [cancellation](../docs/cancellation-and-timeouts.md), [invalidation](../docs/cache-invalidation.md), the [intelligence engine](../docs/intelligence.md), [resilience](../docs/resilience.md), the [scheduler](../docs/scheduler.md), and the [adaptive engine](../docs/adaptive.md).
 
 ## License
 
